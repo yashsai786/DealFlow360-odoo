@@ -93,14 +93,25 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
     }
   };
 
-  // Handle Quick Demo Login
-  const handleQuickLogin = (demoUser: User) => {
-    const user = identityActions.switchUser(demoUser.id);
-    if (user) {
-      toast.success(`Signed in as ${user.name}`, {
-        description: `Role: ${ROLE_LABELS[user.role] ?? user.role}`,
+  // Handle Quick Demo Login via Authentic Credentials
+  const handleQuickLogin = async (demoUser: User) => {
+    setLoginEmail(demoUser.email);
+    setLoginPassword("DealFlow@2026");
+    setLoginLoading(true);
+    try {
+      const user = await identityActions.login(demoUser.email, "DealFlow@2026");
+      setLoginLoading(false);
+      if (user) {
+        toast.success(`Welcome back, ${user.name}!`, {
+          description: `Signed in as ${ROLE_LABELS[user.role] ?? user.role}`,
+        });
+        onSuccess?.(user);
+      }
+    } catch (err: any) {
+      setLoginLoading(false);
+      toast.error("Authentication failed", {
+        description: err.message || "Invalid email address or password.",
       });
-      onSuccess?.(user);
     }
   };
 

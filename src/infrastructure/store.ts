@@ -419,15 +419,6 @@ export const identityActions = {
     }
     set({ session: null });
   },
-  switchUser(userId: string) {
-    const user = state.users.find((u) => u.id === userId);
-    if (user) {
-      set({ session: user });
-      record(`Switched persona to ${user.name}`, "Session", user.id);
-      emit("UserSwitched", `${user.name} (${user.role})`);
-    }
-    return user ?? null;
-  },
 };
 
 /* ------------------------------------------------------------ quotations */

@@ -45,7 +45,6 @@ import {
   Menu,
   X,
   MessageSquareQuote,
-  Layers,
   RotateCw,
   Kanban,
 } from "lucide-react";
@@ -96,15 +95,6 @@ export function AppShell({
   const activeAlertsCount = state.quotations.filter(
     (q) => q.escalated || q.stage === "NEGOTIATION",
   ).length;
-
-  const handleUserSwitch = (user: User) => {
-    identityActions.switchUser(user.id);
-    if (user.role === "CUSTOMER") {
-      onSelectTab("portal");
-    } else if (currentTab === "portal") {
-      onSelectTab("dashboard");
-    }
-  };
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col antialiased">
@@ -217,75 +207,6 @@ export function AppShell({
             </>
           )}
 
-          {/* Quick Flow Presets Menu */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8 text-xs hidden md:flex items-center gap-1.5">
-                <Layers className="h-3.5 w-3.5 text-primary" />
-                <span>Demo Flows</span>
-                <ChevronDown className="h-3 w-3 opacity-60" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel className="text-xs">Quick Demo Scenarios</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => {
-                  const rep = state.users.find((u) => u.role === "SALES_REP");
-                  if (rep) identityActions.switchUser(rep.id);
-                  onSelectTab("quotation-builder", "q-1041");
-                }}
-              >
-                <span className="font-medium text-xs">Flow 1: High Risk & Approval (Q-1041)</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  const mgr = state.users.find((u) => u.role === "SALES_MANAGER");
-                  if (mgr) identityActions.switchUser(mgr.id);
-                  onSelectTab("approvals");
-                }}
-              >
-                <span className="font-medium text-xs">Flow 2: Manager Approvals Queue</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  const fin = state.users.find((u) => u.role === "FINANCE");
-                  if (fin) identityActions.switchUser(fin.id);
-                  onSelectTab("fulfillment");
-                }}
-              >
-                <span className="font-medium text-xs">Flow 3: Warehouse Allocation & Splits</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  const cust = state.users.find((u) => u.role === "CUSTOMER");
-                  if (cust) identityActions.switchUser(cust.id);
-                  onSelectTab("portal");
-                }}
-              >
-                <span className="font-medium text-xs">Flow 4: Customer Portal Negotiation</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  const fin = state.users.find((u) => u.role === "FINANCE");
-                  if (fin) identityActions.switchUser(fin.id);
-                  onSelectTab("invoices");
-                }}
-              >
-                <span className="font-medium text-xs">Flow 5: Partial Payments & Invoicing</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  const rep = state.users.find((u) => u.role === "SALES_REP");
-                  if (rep) identityActions.switchUser(rep.id);
-                  onSelectTab("deal-health");
-                }}
-              >
-                <span className="font-medium text-xs">Flow 6: Deal Health & Nudges</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
           {/* Domain Events Drawer */}
           <Sheet>
             <SheetTrigger asChild>
@@ -386,7 +307,7 @@ export function AppShell({
             {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
 
-          {/* User Persona Switcher */}
+          {/* User Account Menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="h-8 px-2.5 flex items-center gap-2 text-xs">
@@ -394,7 +315,7 @@ export function AppShell({
                   {session?.name.charAt(0) ?? "?"}
                 </div>
                 <div className="hidden sm:flex flex-col items-start leading-none text-left">
-                  <span className="font-medium text-xs truncate max-w-[110px]">{session?.name ?? "Select Role"}</span>
+                  <span className="font-medium text-xs truncate max-w-[110px]">{session?.name ?? "Account"}</span>
                   <span className="text-[10px] text-muted-foreground">
                     {session?.role.replace("_", " ")}
                   </span>
@@ -416,26 +337,6 @@ export function AppShell({
                 <UserCheck className="h-3.5 w-3.5 text-primary" />
                 <span>My Profile</span>
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-[11px] font-semibold text-muted-foreground">
-                Switch Persona / Role
-              </DropdownMenuLabel>
-              {state.users.map((u) => {
-                const active = session?.id === u.id;
-                return (
-                  <DropdownMenuItem
-                    key={u.id}
-                    onClick={() => handleUserSwitch(u)}
-                    className="flex items-center justify-between text-xs py-1.5 cursor-pointer"
-                  >
-                    <div className="flex flex-col">
-                      <span className={active ? "font-semibold text-primary" : "font-medium"}>{u.name}</span>
-                      <span className="text-[10px] text-muted-foreground">{u.role.replace("_", " ")}</span>
-                    </div>
-                    {active && <Badge variant="secondary" className="text-[9px] py-0 px-1">Active</Badge>}
-                  </DropdownMenuItem>
-                );
-              })}
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => identityActions.logout()}

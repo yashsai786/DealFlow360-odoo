@@ -25,7 +25,6 @@ import {
   LogOut,
   Save,
   KeyRound,
-  Users,
   Briefcase,
   History,
   Lock,
@@ -183,18 +182,6 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
     toast.info("Signed out of DealFlow360");
   };
 
-  const handleSwitchUser = (userId: string) => {
-    const user = identityActions.switchUser(userId);
-    if (user) {
-      toast.success(`Switched active profile to ${user.name}`);
-      if (user.role === "CUSTOMER") {
-        onNavigate?.("portal");
-      } else {
-        onNavigate?.("dashboard");
-      }
-    }
-  };
-
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
       {/* Header Banner */}
@@ -247,15 +234,12 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
 
       {/* Tabs Section */}
       <Tabs defaultValue="overview" className="w-full space-y-4">
-        <TabsList className="grid grid-cols-2 md:grid-cols-4 w-full md:w-auto h-auto p-1 gap-1">
+        <TabsList className="grid grid-cols-1 sm:grid-cols-3 w-full md:w-auto h-auto p-1 gap-1">
           <TabsTrigger value="overview" className="text-xs py-2">
             Profile Settings
           </TabsTrigger>
           <TabsTrigger value="permissions" className="text-xs py-2">
             Role Permissions ({ALL_PERMISSIONS.filter((p) => can(session.role, p.key)).length})
-          </TabsTrigger>
-          <TabsTrigger value="switch" className="text-xs py-2">
-            Switch Persona
           </TabsTrigger>
           <TabsTrigger value="activity" className="text-xs py-2">
             Activity History ({personalAudit.length})
@@ -456,87 +440,7 @@ export function ProfileView({ onNavigate }: ProfileViewProps) {
           </Card>
         </TabsContent>
 
-        {/* 3. PERSONA SWITCHER */}
-        <TabsContent value="switch">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Users className="h-4 w-4 text-primary" />
-                Quick Persona Switcher
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Switch instant personas to test role-specific workflows (Manager approvals,
-                Finance reviews, Customer counter-discounts).
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {state.users.map((u) => {
-                  const isActive = u.id === session.id;
-                  return (
-                    <div
-                      key={u.id}
-                      className={`p-3.5 rounded-lg border transition-all ${
-                        isActive
-                          ? "border-primary bg-primary/5 shadow-xs"
-                          : "border-border hover:border-muted-foreground/40 bg-card"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-xs ${
-                              isActive
-                                ? "bg-primary text-primary-foreground"
-                                : "bg-muted text-muted-foreground"
-                            }`}
-                          >
-                            {u.name.charAt(0)}
-                          </div>
-                          <div>
-                            <p className="font-semibold text-xs text-foreground truncate">
-                              {u.name}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground truncate">
-                              {u.email}
-                            </p>
-                          </div>
-                        </div>
-                        {isActive && (
-                          <Badge variant="default" className="text-[9px] py-0 px-1">
-                            Current
-                          </Badge>
-                        )}
-                      </div>
-
-                      <div className="mt-3 pt-2.5 border-t border-border flex items-center justify-between">
-                        <span className="text-[10px] font-mono text-muted-foreground">
-                          {ROLE_LABELS[u.role] ?? u.role}
-                        </span>
-                        {!isActive ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 text-[11px] px-2"
-                            onClick={() => handleSwitchUser(u.id)}
-                          >
-                            Switch to this role
-                          </Button>
-                        ) : (
-                          <span className="text-[10px] text-primary font-medium">
-                            Active Session
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* 4. ACTIVITY HISTORY */}
+        {/* 3. ACTIVITY HISTORY */}
         <TabsContent value="activity">
           <Card>
             <CardHeader>
