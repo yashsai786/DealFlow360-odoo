@@ -49,6 +49,12 @@ import {
   Filter,
   Truck,
   ArrowUpDown,
+  Trash2,
+  Edit,
+  AlertCircle,
+  CheckCircle2,
+  ShieldCheck,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -107,6 +113,60 @@ export function AdminConfigView() {
       setProductModal({ ...productModal, open: false });
     } catch (err: any) {
       toast.error(err.message || "Failed to save product");
+    }
+  };
+
+  // Plan creation and edit modal state
+  const [planModal, setPlanModal] = useState<{
+    open: boolean;
+    isNew: boolean;
+    plan: SubscriptionPlan;
+    refundPreset: "FULL_PRORATED" | "PARTIAL_50" | "NON_REFUNDABLE" | "CUSTOM";
+  }>({
+    open: false,
+    isNew: false,
+    plan: {
+      id: "",
+      name: "",
+      cycle: "Monthly",
+      price: 120,
+      prorationEnabled: true,
+      cancellationPolicy: "Full prorated refund for remaining unused cycle days.",
+    },
+    refundPreset: "FULL_PRORATED",
+  });
+
+  const handleSavePlan = async () => {
+    const p = planModal.plan;
+    if (!p.name.trim()) {
+      toast.error("Plan name is required.");
+      return;
+    }
+    try {
+      if (planModal.isNew) {
+        const id = `plan-${Date.now()}`;
+        await adminActions.createPlan({ ...p, id });
+        toast.success(`Created subscription plan ${p.name}`);
+      } else {
+        await adminActions.savePlan(p);
+        toast.success(`Updated subscription plan ${p.name}`);
+      }
+      setPlanModal({ ...planModal, open: false });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save plan");
+    }
+  };
+
+  const handleDeletePlan = async (planId: string) => {
+    if (state.plans.length <= 1) {
+      toast.error("Cannot delete the last remaining subscription plan.");
+      return;
+    }
+    try {
+      await adminActions.deletePlan(planId);
+      toast.success("Subscription plan deleted.");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete plan");
     }
   };
 
@@ -774,44 +834,185 @@ export function AdminConfigView() {
           </Card>
         </TabsContent>
 
-        {/* Tab 4: Plans */}
-        <TabsContent value="plans" className="space-y-4">
+        {/* Tab 4: Recurring Plans & Billing Governance */}
+        <TabsContent value="plans" className="space-y-6">
           <Card className="shadow-xs">
             <CardHeader className="p-4 border-b border-border">
-              <CardTitle className="text-xs font-semibold">Recurring Subscription Plans</CardTitle>
-              <CardDescription className="text-[11px]">
-                Configured recurring billing cycles and proration policies
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-4 space-y-3">
-              {state.plans.map((pl) => (
-                <div
-                  key={pl.id}
-                  className="p-3 rounded-lg border border-border bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                >
-                  <div>
-                    <div className="font-semibold text-foreground flex items-center gap-2">
-                      <span>{pl.name}</span>
-                      <Badge variant="outline" className="text-[10px] font-mono">
-                        {pl.cycle}
-                      </Badge>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{pl.cancellationPolicy}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">Price / Seat:</span>
-                    <Input
-                      type="number"
-                      value={pl.price}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        adminActions.savePlan({ ...pl, price: val });
-                      }}
-                      className="h-7 w-20 text-xs font-mono text-right font-bold"
-                    />
-                  </div>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <CardTitle className="text-xs font-semibold flex items-center gap-1.5">
+                    <Repeat className="h-3.5 w-3.5 text-primary" />
+                    Recurring Subscription Plans & Billing Policies
+                  </CardTitle>
+                  <CardDescription className="text-[11px]">
+                    Define recurring billing frequencies, automate mid-cycle proration rules, and configure cancellation/refund governance.
+                  </CardDescription>
                 </div>
-              ))}
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    setPlanModal({
+                      open: true,
+                      isNew: true,
+                      plan: {
+                        id: "",
+                        name: "",
+                        cycle: "Monthly",
+                        price: 120,
+                        prorationEnabled: true,
+                        cancellationPolicy: "Full prorated refund for remaining unused cycle days.",
+                      },
+                      refundPreset: "FULL_PRORATED",
+                    })
+                  }
+                  className="h-8 text-xs gap-1.5 shadow-2xs"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Create Recurring Plan
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {state.plans.map((pl) => {
+                  const attachedProducts = state.products.filter(
+                    (prod) => prod.category === "Subscriptions" && prod.cycle === pl.cycle
+                  );
+
+                  return (
+                    <div
+                      key={pl.id}
+                      className="p-4 rounded-lg border border-border bg-card/60 flex flex-col justify-between gap-4 text-xs hover:border-primary/40 transition-colors shadow-2xs"
+                    >
+                      {/* Plan Header */}
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold text-foreground text-sm flex items-center gap-1.5">
+                              {pl.name}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground mt-0.5">
+                              Plan ID: <span className="font-mono">{pl.id}</span>
+                            </div>
+                          </div>
+                          <Badge variant="outline" className="text-[10px] font-mono uppercase">
+                            {pl.cycle}
+                          </Badge>
+                        </div>
+
+                        {/* Price Display / Quick Edit */}
+                        <div className="p-2 rounded-md bg-muted/40 border border-border flex items-center justify-between">
+                          <span className="text-[11px] text-muted-foreground">Base Rate:</span>
+                          <div className="flex items-center gap-1 font-mono font-bold text-sm text-foreground">
+                            <span>₹{pl.price}</span>
+                            <span className="text-[10px] font-normal text-muted-foreground">/ seat / {pl.cycle.toLowerCase()}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Policy Governance Section */}
+                      <div className="space-y-2 pt-2 border-t border-border/70 text-[11px]">
+                        {/* Proration Policy */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <RefreshCw className="h-3 w-3 text-primary" /> Mid-Cycle Proration:
+                          </span>
+                          <Badge
+                            variant={pl.prorationEnabled ? "secondary" : "outline"}
+                            className="text-[10px]"
+                          >
+                            {pl.prorationEnabled ? "Daily Prorated" : "Disabled (At Renewal)"}
+                          </Badge>
+                        </div>
+
+                        {/* Cancellation Policy */}
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground flex items-center gap-1">
+                              <ShieldCheck className="h-3 w-3 text-primary" /> Cancellation Refund:
+                            </span>
+                            <Badge
+                              variant={
+                                pl.cancellationPolicy.toLowerCase().includes("no refund") ||
+                                pl.cancellationPolicy.toLowerCase().includes("non-refundable")
+                                  ? "destructive"
+                                  : pl.cancellationPolicy.toLowerCase().includes("50%")
+                                  ? "outline"
+                                  : "secondary"
+                              }
+                              className="text-[10px]"
+                            >
+                              {pl.cancellationPolicy.toLowerCase().includes("no refund") ||
+                              pl.cancellationPolicy.toLowerCase().includes("non-refundable")
+                                ? "Non-Refundable"
+                                : pl.cancellationPolicy.toLowerCase().includes("50%")
+                                ? "50% Partial Refund"
+                                : "100% Prorated Refund"}
+                            </Badge>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground italic line-clamp-2 bg-muted/20 p-1.5 rounded">
+                            "{pl.cancellationPolicy}"
+                          </p>
+                        </div>
+
+                        {/* Attached Products */}
+                        <div className="space-y-1 pt-1">
+                          <div className="text-muted-foreground font-medium text-[10px] uppercase tracking-wider">
+                            Attached Products ({attachedProducts.length}):
+                          </div>
+                          {attachedProducts.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {attachedProducts.map((p) => (
+                                <Badge key={p.id} variant="outline" className="text-[9px] py-0 px-1.5">
+                                  {p.name}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground italic">
+                              No catalog products currently bound to this cycle.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Card Footer Actions */}
+                      <div className="pt-2 border-t border-border flex items-center justify-between gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            let preset: any = "CUSTOM";
+                            const pol = pl.cancellationPolicy.toLowerCase();
+                            if (pol.includes("no refund") || pol.includes("non-refundable")) preset = "NON_REFUNDABLE";
+                            else if (pol.includes("50%")) preset = "PARTIAL_50";
+                            else if (pol.includes("full") || pol.includes("prorated")) preset = "FULL_PRORATED";
+
+                            setPlanModal({
+                              open: true,
+                              isNew: false,
+                              plan: { ...pl },
+                              refundPreset: preset,
+                            });
+                          }}
+                          className="h-7 text-[11px] gap-1 flex-1"
+                        >
+                          <Edit className="h-3 w-3" />
+                          Edit Rules
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeletePlan(pl.id)}
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -922,6 +1123,50 @@ export function AdminConfigView() {
                 />
               </div>
             </div>
+            {/* Linked Subscription Plan when category is Subscriptions */}
+            {productModal.product.category === "Subscriptions" && (
+              <div className="space-y-1.5 p-2.5 rounded-lg border border-primary/20 bg-primary/5">
+                <label className="font-medium text-foreground text-xs flex items-center gap-1.5">
+                  <Repeat className="h-3.5 w-3.5 text-primary" />
+                  Linked Subscription Recurring Plan
+                </label>
+                <Select
+                  value={
+                    state.plans.find((pl) => pl.cycle === productModal.product.cycle)?.id ||
+                    state.plans[0]?.id
+                  }
+                  onValueChange={(planId) => {
+                    const selectedPlan = state.plans.find((pl) => pl.id === planId);
+                    if (selectedPlan) {
+                      setProductModal({
+                        ...productModal,
+                        product: {
+                          ...productModal.product,
+                          cycle: selectedPlan.cycle,
+                          price: selectedPlan.price,
+                          unit: "seat / " + selectedPlan.cycle.toLowerCase(),
+                        },
+                      });
+                    }
+                  }}
+                >
+                  <SelectTrigger className="text-xs h-8 bg-background">
+                    <SelectValue placeholder="Select Subscription Plan" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {state.plans.map((pl) => (
+                      <SelectItem key={pl.id} value={pl.id} className="text-xs">
+                        {pl.name} ({pl.cycle} · ₹{pl.price}/seat · {pl.prorationEnabled ? "Prorated" : "No Proration"})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="text-[10px] text-muted-foreground">
+                  Associating a recurring plan binds this service to automated billing schedules, proration rules, and cancellation policies.
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1">
               <label className="font-medium text-foreground">Description</label>
               <Input
@@ -1050,6 +1295,185 @@ export function AdminConfigView() {
             </Button>
             <Button size="sm" onClick={handleSaveStockModal} className="text-xs bg-primary text-primary-foreground">
               Save Allocation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Subscription Plan Configuration Modal Dialog */}
+      <Dialog open={planModal.open} onOpenChange={(open) => setPlanModal({ ...planModal, open })}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+              <Repeat className="h-4 w-4 text-primary" />
+              {planModal.isNew ? "Create Recurring Subscription Plan" : "Edit Subscription Plan & Policies"}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Configure billing frequency, mid-cycle seat change proration rules, and cancellation refund governance.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3.5 py-2 text-xs">
+            <div className="space-y-1">
+              <label className="font-medium text-foreground">Plan Name</label>
+              <Input
+                placeholder="e.g. Enterprise Cloud Care"
+                value={planModal.plan.name}
+                onChange={(e) =>
+                  setPlanModal({
+                    ...planModal,
+                    plan: { ...planModal.plan, name: e.target.value },
+                  })
+                }
+                className="h-8 text-xs"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="font-medium text-foreground">Billing Cycle</label>
+                <Select
+                  value={planModal.plan.cycle}
+                  onValueChange={(val: any) =>
+                    setPlanModal({
+                      ...planModal,
+                      plan: { ...planModal.plan, cycle: val },
+                    })
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Monthly" className="text-xs">Monthly (30 days)</SelectItem>
+                    <SelectItem value="Quarterly" className="text-xs">Quarterly (91 days)</SelectItem>
+                    <SelectItem value="Yearly" className="text-xs">Yearly (365 days)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-medium text-foreground">Base Price / Seat (₹)</label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={planModal.plan.price}
+                  onChange={(e) =>
+                    setPlanModal({
+                      ...planModal,
+                      plan: { ...planModal.plan, price: parseFloat(e.target.value) || 0 },
+                    })
+                  }
+                  className="h-8 text-xs font-mono font-semibold"
+                />
+              </div>
+            </div>
+
+            {/* Proration Configuration */}
+            <div className="space-y-1.5 p-2.5 rounded-lg border border-border bg-muted/30">
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-foreground text-xs flex items-center gap-1.5">
+                  <RefreshCw className="h-3.5 w-3.5 text-primary" />
+                  Mid-Cycle Quantity Proration
+                </label>
+                <Button
+                  type="button"
+                  variant={planModal.plan.prorationEnabled ? "default" : "outline"}
+                  size="sm"
+                  onClick={() =>
+                    setPlanModal({
+                      ...planModal,
+                      plan: {
+                        ...planModal.plan,
+                        prorationEnabled: !planModal.plan.prorationEnabled,
+                      },
+                    })
+                  }
+                  className="h-6 px-2 text-[11px]"
+                >
+                  {planModal.plan.prorationEnabled ? "Enabled" : "Disabled"}
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {planModal.plan.prorationEnabled
+                  ? "Mid-cycle seat additions/removals are automatically charged or credited based on unused days remaining in the billing period."
+                  : "Mid-cycle seat changes do not generate interim charges. New seat counts will take effect upon the next cycle renewal."}
+              </p>
+            </div>
+
+            {/* Cancellation & Refund Governance */}
+            <div className="space-y-2 p-2.5 rounded-lg border border-border bg-muted/30">
+              <label className="font-semibold text-foreground text-xs flex items-center gap-1.5">
+                <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+                Cancellation & Refund Governance
+              </label>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted-foreground">Refund Policy Preset</label>
+                <Select
+                  value={planModal.refundPreset}
+                  onValueChange={(val: any) => {
+                    let text = planModal.plan.cancellationPolicy;
+                    if (val === "FULL_PRORATED") text = "Full prorated refund for remaining unused cycle days.";
+                    else if (val === "PARTIAL_50") text = "50% partial refund for remaining unused cycle days.";
+                    else if (val === "NON_REFUNDABLE") text = "Non-refundable. Subscription remains active until end of billing period.";
+
+                    setPlanModal({
+                      ...planModal,
+                      refundPreset: val,
+                      plan: { ...planModal.plan, cancellationPolicy: text },
+                    });
+                  }}
+                >
+                  <SelectTrigger className="h-8 text-xs bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="FULL_PRORATED" className="text-xs">
+                      100% Full Prorated Refund (Remaining Days)
+                    </SelectItem>
+                    <SelectItem value="PARTIAL_50" className="text-xs">
+                      50% Partial Refund (Remaining Days)
+                    </SelectItem>
+                    <SelectItem value="NON_REFUNDABLE" className="text-xs">
+                      0% Non-Refundable (No Refund on Cancel)
+                    </SelectItem>
+                    <SelectItem value="CUSTOM" className="text-xs">
+                      Custom Terms / Policy
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted-foreground">Policy Terms & Description</label>
+                <Input
+                  value={planModal.plan.cancellationPolicy}
+                  onChange={(e) =>
+                    setPlanModal({
+                      ...planModal,
+                      plan: { ...planModal.plan, cancellationPolicy: e.target.value },
+                      refundPreset: "CUSTOM",
+                    })
+                  }
+                  placeholder="e.g. Cancel with 30-day notice. Prorated refunds apply."
+                  className="h-8 text-xs bg-background"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setPlanModal({ ...planModal, open: false })}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSavePlan} className="text-xs bg-primary text-primary-foreground">
+              {planModal.isNew ? "Create Plan" : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

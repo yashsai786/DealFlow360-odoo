@@ -4,6 +4,7 @@ import type {
   InvoiceStatus,
   Payment,
   Subscription,
+  SubscriptionPlan,
 } from "../shared/types";
 import { round } from "../quotations/service";
 
@@ -56,14 +57,28 @@ export function calculateProration(
   sub: Subscription,
   newQty: number,
   newUnitPrice: number,
+  plan?: SubscriptionPlan | null,
   now = new Date(),
 ): ProrationResult {
-  const daysInCycle = CYCLE_DAYS[sub.cycle];
+  const daysInCycle = CYCLE_DAYS[sub.cycle] || 30;
   const next = new Date(sub.nextBillDate).getTime();
   const daysRemaining = Math.max(
     0,
     Math.min(daysInCycle, Math.ceil((next - now.getTime()) / 86400000)),
   );
+
+  // If proration is explicitly disabled on the plan, no mid-cycle difference is charged/credited
+  if (plan && plan.prorationEnabled === false) {
+    return {
+      daysRemaining,
+      daysInCycle,
+      unusedCredit: 0,
+      newCharge: 0,
+      difference: 0,
+      kind: "NONE",
+    };
+  }
+
   const ratio = daysRemaining / daysInCycle;
   const oldAmount = sub.qty * sub.unitPrice;
   const newAmount = newQty * newUnitPrice;
@@ -77,6 +92,60 @@ export function calculateProration(
     newCharge,
     difference,
     kind: difference > 0 ? "CHARGE" : difference < 0 ? "CREDIT" : "NONE",
+  };
+}
+
+export interface CancellationRefundResult {
+  daysRemaining: number;
+  daysInCycle: number;
+  unearnedPeriodAmount: number;
+  refundRatePct: number;
+  refundAmount: number;
+  policyNotes: string;
+  isRefundable: boolean;
+}
+
+/**
+ * Calculates cancellation refund based on remaining unserved cycle days
+ * and the configured cancellation/refund policy of the subscription plan.
+ */
+export function calculateCancellationRefund(
+  sub: Subscription,
+  plan?: SubscriptionPlan | null,
+  now = new Date(),
+): CancellationRefundResult {
+  const daysInCycle = CYCLE_DAYS[sub.cycle] || 30;
+  const next = new Date(sub.nextBillDate).getTime();
+  const daysRemaining = Math.max(
+    0,
+    Math.min(daysInCycle, Math.ceil((next - now.getTime()) / 86400000)),
+  );
+
+  const policy = plan?.cancellationPolicy?.toLowerCase() || "";
+
+  // Determine refund percentage from plan policy rules
+  let refundRatePct = 100; // default full prorated refund
+  if (policy.includes("no refund") || policy.includes("non-refundable") || policy.includes("0%")) {
+    refundRatePct = 0;
+  } else if (policy.includes("50%") || policy.includes("partial") || policy.includes("half")) {
+    refundRatePct = 50;
+  } else if (policy.includes("25%")) {
+    refundRatePct = 25;
+  } else if (policy.includes("75%")) {
+    refundRatePct = 75;
+  }
+
+  const unearnedPeriodAmount = round((daysRemaining / daysInCycle) * (sub.qty * sub.unitPrice));
+  const refundAmount = round(unearnedPeriodAmount * (refundRatePct / 100));
+
+  return {
+    daysRemaining,
+    daysInCycle,
+    unearnedPeriodAmount,
+    refundRatePct,
+    refundAmount,
+    policyNotes: plan?.cancellationPolicy || "Prorated refund for remaining unused days",
+    isRefundable: refundAmount > 0,
   };
 }
 
