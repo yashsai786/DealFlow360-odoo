@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   useAppState,
   productMap,
@@ -37,15 +37,17 @@ import {
   Clock,
   History,
   MessageSquareQuote,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { canPerformAction } from "../../modules/identity/permissions";
 
 interface ApprovalsViewProps {
   onOpenQuote: (quoteId: string) => void;
+  initialApprovalId?: string;
 }
 
-export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
+export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewProps) {
   const state = useAppState();
   const products = productMap(state);
   const customers = customerMap(state);
@@ -59,8 +61,16 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
   });
 
   const [selectedApprovalId, setSelectedApprovalId] = useState<string>(
-    visibleApprovals.find((a) => a.status === "PENDING")?.id ?? visibleApprovals[0]?.id ?? "",
+    initialApprovalId || visibleApprovals.find((a) => a.status === "PENDING")?.id || visibleApprovals[0]?.id || "",
   );
+
+  useEffect(() => {
+    if (initialApprovalId) {
+      setSelectedApprovalId(initialApprovalId);
+    }
+  }, [initialApprovalId]);
+
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Dialog for Return / Reject reason
   const [decisionModal, setDecisionModal] = useState<{
@@ -81,6 +91,21 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
 
   const pendingApprovals = visibleApprovals.filter((a) => a.status === "PENDING");
   const pastApprovals = visibleApprovals.filter((a) => a.status !== "PENDING");
+
+  const filteredPending = pendingApprovals.filter((a) => {
+    if (!searchQuery.trim()) return true;
+    const term = searchQuery.toLowerCase().trim();
+    const q = state.quotations.find((x) => x.id === a.quotationId);
+    const cust = customers[q?.customerId ?? ""];
+    const nextStep = a.steps.find((s) => s.status === "PENDING");
+    return (
+      q?.number.toLowerCase().includes(term) ||
+      cust?.name.toLowerCase().includes(term) ||
+      a.riskLevel.toLowerCase().includes(term) ||
+      a.id.toLowerCase().includes(term) ||
+      nextStep?.role.toLowerCase().includes(term)
+    );
+  });
 
   const handleApprove = async () => {
     if (!selectedApproval) return;
@@ -129,14 +154,35 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
         {/* Left Col: Queue */}
         <div className="space-y-4">
           <Card className="shadow-xs">
-            <CardHeader className="p-4 pb-2 border-b border-border">
-              <CardTitle className="text-xs font-semibold flex items-center gap-1.5">
-                <Clock className="h-4 w-4 text-amber-500" />
-                Pending Review Queue ({pendingApprovals.length})
+            <CardHeader className="p-3 border-b border-border space-y-2">
+              <CardTitle className="text-xs font-semibold flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Clock className="h-4 w-4 text-amber-500" />
+                  Pending Review Queue ({filteredPending.length})
+                </span>
+                {searchQuery && (
+                  <span className="text-[10px] text-muted-foreground font-normal">
+                    {filteredPending.length} of {pendingApprovals.length}
+                  </span>
+                )}
               </CardTitle>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Search approvals (e.g. Q-1041, Acme)..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 h-8 text-xs w-full bg-background"
+                />
+              </div>
             </CardHeader>
             <CardContent className="p-2 space-y-1.5">
-              {pendingApprovals.map((a) => {
+              {filteredPending.length === 0 ? (
+                <div className="p-6 text-center text-xs text-muted-foreground">
+                  {searchQuery ? "No approvals matching your search" : "No pending approvals in queue"}
+                </div>
+              ) : (
+                filteredPending.map((a) => {
                 const q = state.quotations.find((x) => x.id === a.quotationId);
                 const cust = customers[q?.customerId ?? ""];
                 const active = a.id === selectedApprovalId;
@@ -177,10 +223,7 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
                     </div>
                   </div>
                 );
-              })}
-              {pendingApprovals.length === 0 && (
-                <p className="text-xs text-muted-foreground py-4 text-center">No pending approvals.</p>
-              )}
+              }))}
             </CardContent>
           </Card>
 

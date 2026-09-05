@@ -4,6 +4,7 @@ import {
   identityActions,
 } from "../../infrastructure/store";
 import type { Role, User } from "../../modules/shared/types";
+import { GlobalSearch } from "./GlobalSearch";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import {
@@ -155,8 +156,13 @@ export function AppShell({
           )}
         </div>
 
+        {/* Universal Search Bar: Accessible on all pages for quotations & approvals */}
+        <div className="flex-1 flex justify-center px-2 lg:px-4 max-w-sm sm:max-w-md lg:max-w-lg min-w-0">
+          <GlobalSearch onSelectTab={onSelectTab} />
+        </div>
+
         {/* Right Header Actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {/* Actions: Reload Data, Go to Back-end, Close Workspace */}
           {!isCustomer && (
             <>

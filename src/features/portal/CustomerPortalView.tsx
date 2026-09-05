@@ -33,6 +33,8 @@ import {
   ArrowRight,
   TrendingDown,
   Info,
+  Search,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -86,7 +88,11 @@ export function getCustomerStatus(quotation: Quotation): {
   };
 }
 
-export function CustomerPortalView() {
+interface CustomerPortalViewProps {
+  initialQuoteId?: string;
+}
+
+export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps = {}) {
   const state = useAppState();
   const products = productMap(state);
   const customers = customerMap(state);
@@ -98,8 +104,16 @@ export function CustomerPortalView() {
   const myQuotations = state.quotations.filter((q) => q.customerId === myCustomerId);
 
   const [selectedQuoteId, setSelectedQuoteId] = useState<string>(
-    myQuotations[0]?.id ?? "",
+    initialQuoteId || myQuotations[0]?.id || "",
   );
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Sync selectedQuoteId if initialQuoteId prop changes
+  useEffect(() => {
+    if (initialQuoteId) {
+      setSelectedQuoteId(initialQuoteId);
+    }
+  }, [initialQuoteId]);
 
   // Sync selectedQuoteId if list changes
   useEffect(() => {
@@ -107,6 +121,23 @@ export function CustomerPortalView() {
       setSelectedQuoteId(myQuotations[0]!.id);
     }
   }, [myQuotations, selectedQuoteId]);
+
+  const filteredQuotations = myQuotations.filter((q) => {
+    if (!searchQuery.trim()) return true;
+    const term = searchQuery.toLowerCase().trim();
+    const qTotals = totalsOf(state, q);
+    const qStatus = getCustomerStatus(q);
+    const hasMatchingProduct = q.lines.some((l) => {
+      const p = products[l.productId];
+      return p?.name.toLowerCase().includes(term) || l.productId.toLowerCase().includes(term);
+    });
+    return (
+      q.number.toLowerCase().includes(term) ||
+      qStatus.label.toLowerCase().includes(term) ||
+      qTotals.total.toString().includes(term) ||
+      hasMatchingProduct
+    );
+  });
 
   const quotation = myQuotations.find((q) => q.id === selectedQuoteId);
   const totals = quotation ? totalsOf(state, quotation) : null;
@@ -290,17 +321,53 @@ export function CustomerPortalView() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Col: Customer Proposals List */}
         <Card className="shadow-xs border-border">
-          <CardHeader className="p-4 pb-2 border-b border-border">
-            <CardTitle className="text-xs font-semibold flex items-center gap-1.5">
-              <FileText className="h-4 w-4 text-primary" />
-              Commercial Proposals ({myQuotations.length})
-            </CardTitle>
-            <CardDescription className="text-[11px]">
-              Select a quote to review terms or propose adjustments
-            </CardDescription>
+          <CardHeader className="p-4 pb-3 border-b border-border space-y-2.5">
+            <div>
+              <CardTitle className="text-xs font-semibold flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <FileText className="h-4 w-4 text-primary" />
+                  Commercial Proposals ({filteredQuotations.length})
+                </span>
+                {searchQuery && (
+                  <span className="text-[10px] text-muted-foreground font-normal">
+                    Filtering {filteredQuotations.length} of {myQuotations.length}
+                  </span>
+                )}
+              </CardTitle>
+              <CardDescription className="text-[11px] mt-0.5">
+                Select a quote to review terms or propose adjustments
+              </CardDescription>
+            </div>
+
+            {/* In-page Search Bar for Customer Screen */}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Search proposals by quote #, status, items..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-8 pr-7 h-8 text-xs w-full bg-background"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-2 p-0.5 rounded text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="p-2 space-y-1.5">
-            {myQuotations.map((q) => {
+            {filteredQuotations.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted-foreground space-y-1">
+                <Search className="h-5 w-5 mx-auto opacity-30 mb-1" />
+                <p className="font-medium text-foreground">No proposals found</p>
+                <p className="text-[11px]">No quotations match &ldquo;{searchQuery}&rdquo;</p>
+              </div>
+            ) : (
+              filteredQuotations.map((q) => {
               const active = q.id === selectedQuoteId;
               const qTotals = totalsOf(state, q);
               const qStatus = getCustomerStatus(q);
@@ -337,10 +404,7 @@ export function CustomerPortalView() {
                   </div>
                 </div>
               );
-            })}
-            {myQuotations.length === 0 && (
-              <p className="text-xs text-muted-foreground py-8 text-center">No proposals found for your account.</p>
-            )}
+            }))}
           </CardContent>
         </Card>
 

@@ -35,6 +35,7 @@ export default function App() {
   const [selectedQuotationId, setSelectedQuotationId] = useState<string | undefined>(
     "q-1041",
   );
+  const [selectedApprovalId, setSelectedApprovalId] = useState<string | undefined>();
 
   // Auto-switch to authorized tab if user switches role
   useEffect(() => {
@@ -47,7 +48,11 @@ export default function App() {
 
   const handleNavigate = (tab: NavTab, extraId?: string) => {
     if (extraId) {
-      setSelectedQuotationId(extraId);
+      if (tab === "approvals") {
+        setSelectedApprovalId(extraId);
+      } else {
+        setSelectedQuotationId(extraId);
+      }
     }
     setCurrentTab(tab);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -133,6 +138,7 @@ export default function App() {
               {currentTab === "approvals" && (
                 <ApprovalsView
                   onOpenQuote={(quoteId) => handleNavigate("quotation-builder", quoteId)}
+                  initialApprovalId={selectedApprovalId}
                 />
               )}
 
@@ -156,7 +162,9 @@ export default function App() {
 
               {currentTab === "admin" && <AdminConfigView />}
 
-              {currentTab === "portal" && <CustomerPortalView />}
+              {currentTab === "portal" && (
+                <CustomerPortalView initialQuoteId={selectedQuotationId} />
+              )}
 
               {currentTab === "profile" && <ProfileView onNavigate={handleNavigate} />}
             </>
