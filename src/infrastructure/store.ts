@@ -58,7 +58,7 @@ import {
   InvalidStateTransition,
   SubscriptionModificationInvalid,
 } from "../lib/errors";
-import { productsApi, usersApi, warehousesApi, plansApi, governanceApi, quotationsApi, approvalsApi } from "../lib/api";
+import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, approvalsApi } from "../lib/api";
 
 export interface AppState {
   session: User | null;
@@ -330,6 +330,12 @@ export const identityActions = {
       // Sync warehouses — DB is authoritative
       const dbWarehouses = await warehousesApi.list();
       if (dbWarehouses.length > 0) set({ warehouses: dbWarehouses });
+
+      // Sync inventory — DB is authoritative
+      const dbInventory = await inventoryApi.list();
+      if (dbInventory && dbInventory.length > 0) {
+        set({ inventory: dbInventory });
+      }
 
       // Sync subscription plans — DB is authoritative
       const dbPlans = await plansApi.list();
@@ -718,16 +724,28 @@ export const fulfillmentActions = {
     notify();
   },
 
-  replenish(warehouseId: string, productId: string, qty: number) {
+  async replenish(warehouseId: string, productId: string, qty: number) {
     const user = requireSession();
     assertCan(user.role, "fulfillment.manage");
+    const current = state.inventory.find((i) => i.warehouseId === warehouseId && i.productId === productId);
+    const newAvailable = (current?.available ?? 0) + qty;
+    const item: InventoryItem = {
+      warehouseId,
+      productId,
+      available: newAvailable,
+      reserved: current?.reserved ?? 0,
+      replenishmentDays: current?.replenishmentDays ?? 7,
+    };
+    try {
+      await inventoryApi.upsert(item);
+    } catch (err) {
+      console.error("[Inventory] Replenish persist failed:", err);
+    }
     state = {
       ...state,
-      inventory: state.inventory.map((i) =>
-        i.warehouseId === warehouseId && i.productId === productId
-          ? { ...i, available: i.available + qty }
-          : i,
-      ),
+      inventory: state.inventory.some((i) => i.warehouseId === warehouseId && i.productId === productId)
+        ? state.inventory.map((i) => (i.warehouseId === warehouseId && i.productId === productId ? item : i))
+        : [...state.inventory, item],
     };
     record(`Replenished ${qty} units`, "Inventory", `${warehouseId}/${productId}`);
     emit("StockReplenished", `${warehouseId} · ${qty} units`);
@@ -1090,5 +1108,30 @@ export const adminActions = {
     const saved = await plansApi.update(plan);
     set({ plans: state.plans.map((p) => (p.id === saved.id ? saved : p)) });
     record(`Updated ${saved.name}`, "SubscriptionPlan", saved.id);
+  },
+
+  async saveStock(warehouseId: string, productId: string, available: number, replenishmentDays: number = 7) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    const existing = state.inventory.find((i) => i.warehouseId === warehouseId && i.productId === productId);
+    const reserved = existing?.reserved ?? 0;
+    const item: InventoryItem = {
+      warehouseId,
+      productId,
+      available: Math.max(0, available),
+      reserved,
+      replenishmentDays: Math.max(0, replenishmentDays),
+    };
+    const saved = await inventoryApi.upsert(item);
+    const exists = state.inventory.some((i) => i.warehouseId === warehouseId && i.productId === productId);
+    set({
+      inventory: exists
+        ? state.inventory.map((i) => (i.warehouseId === warehouseId && i.productId === productId ? saved : i))
+        : [...state.inventory, saved],
+    });
+    const pName = state.products.find((p) => p.id === productId)?.name || productId;
+    const wName = state.warehouses.find((w) => w.id === warehouseId)?.name || warehouseId;
+    record(`Stock updated for ${pName} at ${wName}: ${saved.available} units`, "Inventory", `${warehouseId}_${productId}`);
+    return saved;
   },
 };

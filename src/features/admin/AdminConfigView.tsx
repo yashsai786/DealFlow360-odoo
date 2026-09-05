@@ -41,6 +41,14 @@ import {
   Sparkles,
   Plus,
   Save,
+  Boxes,
+  Layers,
+  Clock,
+  Check,
+  Search,
+  Filter,
+  Truck,
+  ArrowUpDown,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -99,6 +107,87 @@ export function AdminConfigView() {
       setProductModal({ ...productModal, open: false });
     } catch (err: any) {
       toast.error(err.message || "Failed to save product");
+    }
+  };
+
+  // Warehouse & Stock Filter states
+  const [warehouseFilter, setWarehouseFilter] = useState<string>("all");
+  const [stockSearch, setStockSearch] = useState<string>("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+
+  // Stock edit tracking map: `${warehouseId}_${productId}` -> { available, replenishmentDays }
+  const [stockEdits, setStockEdits] = useState<Record<string, { available: number; replenishmentDays: number }>>({});
+
+  // Add stock allocation modal state
+  const [stockModal, setStockModal] = useState<{
+    open: boolean;
+    warehouseId: string;
+    productId: string;
+    available: number;
+    replenishmentDays: number;
+  }>({
+    open: false,
+    warehouseId: "",
+    productId: "",
+    available: 10,
+    replenishmentDays: 7,
+  });
+
+  const handleStockChange = (warehouseId: string, productId: string, field: "available" | "replenishmentDays", value: number) => {
+    const key = `${warehouseId}_${productId}`;
+    const current = stockEdits[key] || {
+      available: state.inventory.find((i) => i.warehouseId === warehouseId && i.productId === productId)?.available ?? 0,
+      replenishmentDays: state.inventory.find((i) => i.warehouseId === warehouseId && i.productId === productId)?.replenishmentDays ?? 7,
+    };
+    setStockEdits({
+      ...stockEdits,
+      [key]: {
+        ...current,
+        [field]: Math.max(0, value),
+      },
+    });
+  };
+
+  const handleSaveStock = async (warehouseId: string, productId: string) => {
+    const key = `${warehouseId}_${productId}`;
+    const edit = stockEdits[key];
+    const currentItem = state.inventory.find((i) => i.warehouseId === warehouseId && i.productId === productId);
+    const available = edit !== undefined ? edit.available : (currentItem?.available ?? 0);
+    const replenishmentDays = edit !== undefined ? edit.replenishmentDays : (currentItem?.replenishmentDays ?? 7);
+
+    try {
+      await adminActions.saveStock(warehouseId, productId, available, replenishmentDays);
+      const pName = state.products.find((p) => p.id === productId)?.name || productId;
+      const wName = state.warehouses.find((w) => w.id === warehouseId)?.name || warehouseId;
+      toast.success(`Updated ${pName} stock at ${wName} to ${available} units.`);
+      const nextEdits = { ...stockEdits };
+      delete nextEdits[key];
+      setStockEdits(nextEdits);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save stock level");
+    }
+  };
+
+  const handleSaveStockModal = async () => {
+    const wId = stockModal.warehouseId || state.warehouses[0]?.id;
+    const pId = stockModal.productId || state.products[0]?.id;
+    if (!wId || !pId) {
+      toast.error("Please select both a depot warehouse and a product.");
+      return;
+    }
+    try {
+      await adminActions.saveStock(
+        wId,
+        pId,
+        stockModal.available,
+        stockModal.replenishmentDays,
+      );
+      const pName = state.products.find((p) => p.id === pId)?.name || pId;
+      const wName = state.warehouses.find((w) => w.id === wId)?.name || wId;
+      toast.success(`Allocated ${stockModal.available} units of ${pName} to ${wName}.`);
+      setStockModal({ ...stockModal, open: false });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to allocate stock");
     }
   };
 
@@ -312,40 +401,375 @@ export function AdminConfigView() {
           </Card>
         </TabsContent>
 
-        {/* Tab 3: Warehouses */}
-        <TabsContent value="warehouses" className="space-y-4">
+        {/* Tab 3: Warehouses & Logistics */}
+        <TabsContent value="warehouses" className="space-y-6">
+          {/* Section 1: Depot Facilities & Freight Rates */}
           <Card className="shadow-xs">
             <CardHeader className="p-4 border-b border-border">
-              <CardTitle className="text-xs font-semibold">Warehouse Logistics & Freight Surcharges</CardTitle>
-              <CardDescription className="text-[11px]">
-                Shipment freight costs utilized by the cost-optimal split engine
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-4 space-y-3">
-              {state.warehouses.map((w) => (
-                <div
-                  key={w.id}
-                  className="p-3 rounded-lg border border-border bg-card flex items-center justify-between text-xs"
-                >
-                  <div>
-                    <div className="font-semibold text-foreground">{w.name}</div>
-                    <div className="text-[11px] text-muted-foreground">{w.location}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground text-xs">Freight Surcharge (₹):</span>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={w.shipmentCost}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        adminActions.saveWarehouse({ ...w, shipmentCost: val });
-                      }}
-                      className="h-7 w-20 text-xs font-mono text-right"
-                    />
-                  </div>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <CardTitle className="text-xs font-semibold flex items-center gap-1.5">
+                    <Building className="h-3.5 w-3.5 text-primary" />
+                    Fulfillment Depots & Freight Surcharges
+                  </CardTitle>
+                  <CardDescription className="text-[11px]">
+                    Multi-depot shipping freight rates evaluated by the cost-optimal split fulfillment engine
+                  </CardDescription>
                 </div>
-              ))}
+                <Badge variant="outline" className="text-[11px] font-mono w-fit">
+                  {state.warehouses.length} Active Depots
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {state.warehouses.map((w) => {
+                  const depotStockCount = state.inventory
+                    .filter((i) => i.warehouseId === w.id)
+                    .reduce((sum, i) => sum + i.available, 0);
+
+                  return (
+                    <div
+                      key={w.id}
+                      className="p-3.5 rounded-lg border border-border bg-card/60 flex flex-col justify-between gap-3 text-xs hover:border-primary/40 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="font-semibold text-foreground text-sm flex items-center gap-1.5">
+                            {w.name}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                            <Truck className="h-3 w-3" />
+                            {w.location}
+                          </div>
+                        </div>
+                        <Badge variant="secondary" className="text-[10px] font-mono">
+                          {depotStockCount} Total Units
+                        </Badge>
+                      </div>
+
+                      <div className="pt-2 border-t border-border/60 flex items-center justify-between">
+                        <span className="text-[11px] text-muted-foreground">Freight Surcharge:</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-muted-foreground font-mono text-xs">₹</span>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={w.shipmentCost}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              adminActions.saveWarehouse({ ...w, shipmentCost: val });
+                            }}
+                            className="h-7 w-20 text-xs font-mono text-right"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Section 2: Depot Stock Levels & Replenishment Matrix */}
+          <Card className="shadow-xs">
+            <CardHeader className="p-4 border-b border-border">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <CardTitle className="text-xs font-semibold flex items-center gap-1.5">
+                    <Boxes className="h-3.5 w-3.5 text-primary" />
+                    Multi-Depot Inventory Stock Levels & Lead Times
+                  </CardTitle>
+                  <CardDescription className="text-[11px]">
+                    Manage stock availability per product at each depot. Products with 0 units will trigger backorder handling or split sourcing.
+                  </CardDescription>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    setStockModal({
+                      open: true,
+                      warehouseId: state.warehouses[0]?.id || "",
+                      productId: state.products[0]?.id || "",
+                      available: 10,
+                      replenishmentDays: 7,
+                    })
+                  }
+                  className="h-8 text-xs gap-1.5 shadow-2xs"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Allocate Stock to Depot
+                </Button>
+              </div>
+
+              {/* Filters bar */}
+              <div className="pt-3 flex flex-wrap items-center gap-2 text-xs">
+                <div className="relative flex-1 min-w-[200px] max-w-xs">
+                  <Search className="h-3.5 w-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Search product SKU / name..."
+                    value={stockSearch}
+                    onChange={(e) => setStockSearch(e.target.value)}
+                    className="h-8 pl-8 text-xs"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                    <Filter className="h-3 w-3" /> Depot:
+                  </span>
+                  <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
+                    <SelectTrigger className="h-8 text-xs w-[170px]">
+                      <SelectValue placeholder="All Depots" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Depots</SelectItem>
+                      {state.warehouses.map((w) => (
+                        <SelectItem key={w.id} value={w.id}>
+                          {w.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">Category:</span>
+                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                    <SelectTrigger className="h-8 text-xs w-[130px]">
+                      <SelectValue placeholder="All Categories" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Categories</SelectItem>
+                      <SelectItem value="Hardware">Hardware</SelectItem>
+                      <SelectItem value="Services">Services</SelectItem>
+                      <SelectItem value="Subscriptions">Subscriptions</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-xs">Product Details</TableHead>
+                    <TableHead className="text-xs">Fulfillment Depot</TableHead>
+                    <TableHead className="text-xs text-center w-36">Available Units</TableHead>
+                    <TableHead className="text-xs text-center w-28">Reserved</TableHead>
+                    <TableHead className="text-xs text-center w-28">Net Free Stock</TableHead>
+                    <TableHead className="text-xs text-center w-36">Lead Time (Days)</TableHead>
+                    <TableHead className="text-xs text-right w-24">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(() => {
+                    const targetWarehouses =
+                      warehouseFilter === "all"
+                        ? state.warehouses
+                        : state.warehouses.filter((w) => w.id === warehouseFilter);
+
+                    const filteredProducts = state.products.filter((p) => {
+                      const matchSearch =
+                        !stockSearch.trim() ||
+                        p.name.toLowerCase().includes(stockSearch.toLowerCase()) ||
+                        p.id.toLowerCase().includes(stockSearch.toLowerCase());
+                      const matchCat =
+                        categoryFilter === "all" || p.category === categoryFilter;
+                      return matchSearch && matchCat;
+                    });
+
+                    const rows = targetWarehouses.flatMap((wh) =>
+                      filteredProducts.map((prod) => {
+                        const invItem = state.inventory.find(
+                          (i) => i.warehouseId === wh.id && i.productId === prod.id
+                        );
+                        return {
+                          warehouse: wh,
+                          product: prod,
+                          available: invItem?.available ?? 0,
+                          reserved: invItem?.reserved ?? 0,
+                          replenishmentDays: invItem?.replenishmentDays ?? 7,
+                          isConfigured: !!invItem,
+                        };
+                      })
+                    );
+
+                    if (rows.length === 0) {
+                      return (
+                        <TableRow>
+                          <TableCell colSpan={7} className="h-32 text-center text-xs text-muted-foreground">
+                            No products or inventory match the selected filter criteria.
+                          </TableCell>
+                        </TableRow>
+                      );
+                    }
+
+                    return rows.map((row) => {
+                      const editKey = `${row.warehouse.id}_${row.product.id}`;
+                      const edit = stockEdits[editKey];
+                      const availableVal = edit !== undefined ? edit.available : row.available;
+                      const leadVal = edit !== undefined ? edit.replenishmentDays : row.replenishmentDays;
+                      const isDirty = edit !== undefined;
+                      const netFree = availableVal - row.reserved;
+
+                      return (
+                        <TableRow key={editKey} className="text-xs hover:bg-muted/40 transition-colors">
+                          {/* Product Info */}
+                          <TableCell className="py-2.5">
+                            <div className="font-medium text-foreground flex items-center gap-1.5">
+                              {row.product.name}
+                              {!row.isConfigured && (
+                                <Badge variant="outline" className="text-[9px] py-0 px-1 border-dashed text-muted-foreground">
+                                  Not Set
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <span className="font-mono">{row.product.id}</span>
+                              <span>·</span>
+                              <Badge variant="outline" className="text-[9px] py-0 px-1">
+                                {row.product.category}
+                              </Badge>
+                              <span>·</span>
+                              <span>Per {row.product.unit}</span>
+                            </div>
+                          </TableCell>
+
+                          {/* Warehouse Depot */}
+                          <TableCell className="py-2.5">
+                            <div className="font-medium text-foreground">{row.warehouse.name}</div>
+                            <div className="text-[10px] text-muted-foreground">{row.warehouse.location}</div>
+                          </TableCell>
+
+                          {/* Available Units (Editable) */}
+                          <TableCell className="py-2.5 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-6 w-6 text-[11px]"
+                                onClick={() =>
+                                  handleStockChange(
+                                    row.warehouse.id,
+                                    row.product.id,
+                                    "available",
+                                    Math.max(0, availableVal - 1)
+                                  )
+                                }
+                              >
+                                -
+                              </Button>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={availableVal}
+                                onChange={(e) =>
+                                  handleStockChange(
+                                    row.warehouse.id,
+                                    row.product.id,
+                                    "available",
+                                    parseInt(e.target.value) || 0
+                                  )
+                                }
+                                className={`h-7 w-16 text-center text-xs font-mono font-semibold ${
+                                  isDirty ? "border-amber-500 bg-amber-50/10" : ""
+                                }`}
+                              />
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-6 w-6 text-[11px]"
+                                onClick={() =>
+                                  handleStockChange(
+                                    row.warehouse.id,
+                                    row.product.id,
+                                    "available",
+                                    availableVal + 1
+                                  )
+                                }
+                              >
+                                +
+                              </Button>
+                            </div>
+                          </TableCell>
+
+                          {/* Reserved Units */}
+                          <TableCell className="py-2.5 text-center">
+                            <Badge variant="outline" className="font-mono text-xs">
+                              {row.reserved}
+                            </Badge>
+                          </TableCell>
+
+                          {/* Net Free Stock */}
+                          <TableCell className="py-2.5 text-center">
+                            <Badge
+                              variant={
+                                netFree > 5
+                                  ? "secondary"
+                                  : netFree > 0
+                                  ? "outline"
+                                  : "destructive"
+                              }
+                              className="font-mono text-xs"
+                            >
+                              {netFree > 0 ? `${netFree} Free` : netFree === 0 ? "0 Free" : `${netFree} Deficit`}
+                            </Badge>
+                          </TableCell>
+
+                          {/* Lead Time (Days) */}
+                          <TableCell className="py-2.5 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <Input
+                                type="number"
+                                min={0}
+                                value={leadVal}
+                                onChange={(e) =>
+                                  handleStockChange(
+                                    row.warehouse.id,
+                                    row.product.id,
+                                    "replenishmentDays",
+                                    parseInt(e.target.value) || 0
+                                  )
+                                }
+                                className={`h-7 w-14 text-center text-xs font-mono ${
+                                  isDirty ? "border-amber-500 bg-amber-50/10" : ""
+                                }`}
+                              />
+                              <span className="text-[11px] text-muted-foreground">days</span>
+                            </div>
+                          </TableCell>
+
+                          {/* Actions */}
+                          <TableCell className="py-2.5 text-right">
+                            <Button
+                              size="sm"
+                              variant={isDirty ? "default" : "ghost"}
+                              className={`h-7 px-2.5 text-[11px] gap-1 ${
+                                isDirty ? "bg-amber-600 hover:bg-amber-700 text-white" : ""
+                              }`}
+                              onClick={() => handleSaveStock(row.warehouse.id, row.product.id)}
+                            >
+                              {isDirty ? (
+                                <>
+                                  <Save className="h-3 w-3" />
+                                  Save
+                                </>
+                              ) : (
+                                <>
+                                  <Check className="h-3 w-3 text-muted-foreground" />
+                                  Saved
+                                </>
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    });
+                  })()}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         </TabsContent>
@@ -523,6 +947,109 @@ export function AdminConfigView() {
             </Button>
             <Button size="sm" onClick={handleSaveProduct} className="text-xs">
               Save Product
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Allocate Stock Modal Dialog */}
+      <Dialog open={stockModal.open} onOpenChange={(open) => setStockModal({ ...stockModal, open })}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+              <Boxes className="h-4 w-4 text-primary" />
+              Allocate Stock to Depot
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Assign initial inventory or update stock for a product at a specific fulfillment warehouse.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-3 text-xs">
+            <div className="space-y-1">
+              <label className="font-medium text-foreground">Target Fulfillment Depot</label>
+              <Select
+                value={stockModal.warehouseId}
+                onValueChange={(val) => setStockModal({ ...stockModal, warehouseId: val })}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Select Warehouse Depot" />
+                </SelectTrigger>
+                <SelectContent>
+                  {state.warehouses.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>
+                      {w.name} ({w.location})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-medium text-foreground">Product</label>
+              <Select
+                value={stockModal.productId}
+                onValueChange={(val) => setStockModal({ ...stockModal, productId: val })}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Select Product" />
+                </SelectTrigger>
+                <SelectContent>
+                  {state.products.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name} ({p.category} · {p.id})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="font-medium text-foreground">Available Quantity</label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={stockModal.available}
+                  onChange={(e) =>
+                    setStockModal({
+                      ...stockModal,
+                      available: parseInt(e.target.value) || 0,
+                    })
+                  }
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-medium text-foreground">Lead Time (Days)</label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={stockModal.replenishmentDays}
+                  onChange={(e) =>
+                    setStockModal({
+                      ...stockModal,
+                      replenishmentDays: parseInt(e.target.value) || 0,
+                    })
+                  }
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setStockModal({ ...stockModal, open: false })}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSaveStockModal} className="text-xs bg-primary text-primary-foreground">
+              Save Allocation
             </Button>
           </DialogFooter>
         </DialogContent>
