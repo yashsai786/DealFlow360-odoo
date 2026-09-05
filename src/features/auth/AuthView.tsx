@@ -42,8 +42,8 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
   const [activeTab, setActiveTab] = useState<"login" | "signup">(defaultTab);
 
   // Login Form State
-  const [loginEmail, setLoginEmail] = useState("rep@dealflow360.io");
-  const [loginPassword, setLoginPassword] = useState("DealFlow@2026");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
 
   // Sign Up Form State
@@ -214,6 +214,7 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
                         <Input
                           id="password"
                           type="password"
+                          placeholder="••••••••"
                           value={loginPassword}
                           onChange={(e) => setLoginPassword(e.target.value)}
                           className="pl-8 text-xs h-9"
