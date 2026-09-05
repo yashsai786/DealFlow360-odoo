@@ -25,6 +25,100 @@ model Customer {
   createdAt    DateTime @default(now())
 }
 
+model Product {
+  id          String   @id
+  name        String
+  category    String
+  unit        String
+  price       Float
+  cost        Float
+  taxPct      Float
+  description String
+  cycle       String?
+  createdAt   DateTime @default(now())
+}
+
+model Warehouse {
+  id           String @id
+  name         String
+  location     String
+  shipmentCost Float
+}
+
+model InventoryItem {
+  id                String @id
+  warehouseId       String
+  productId         String
+  available         Int
+  reserved          Int
+  replenishmentDays Int
+}
+
+model Quotation {
+  id                       String   @id
+  number                   String   @unique
+  customerId               String
+  ownerId                  String
+  stage                    String
+  lines                    String   // JSON serialized QuotationLine[]
+  messages                 String   // JSON serialized NegotiationMessage[]
+  requests                 String   // JSON serialized NegotiationRequest[]
+  dismissedRecommendations String   // JSON serialized string[]
+  requestedDeliveryDate    String?
+  promisedDeliveryDate     String?
+  nudgedAt                 String?
+  escalated                Boolean  @default(false)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
+
+model Approval {
+  id          String   @id
+  quotationId String
+  status      String
+  steps       String   // JSON serialized ApprovalStep[]
+  riskLevel   String
+  submittedBy String
+  submittedAt DateTime @default(now())
+}
+
+model FulfillmentOrder {
+  id          String   @id
+  quotationId String
+  status      String
+  allocations String   // JSON serialized Allocation[]
+  backorders  String   // JSON serialized Backorder[]
+  shippedAt   String?
+  dueAt       String
+  createdAt   DateTime @default(now())
+}
+
+model Subscription {
+  id          String @id
+  customerId  String
+  quotationId String
+  planId      String
+  qty         Int
+  unitPrice   Float
+  cycle       String
+  startDate   String
+  nextBillDate String
+  status      String
+  adjustments String // JSON serialized BillingAdjustment[]
+}
+
+model Invoice {
+  id          String @id
+  number      String @unique
+  customerId  String
+  quotationId String
+  amount      Float
+  status      String
+  issuedAt    String
+  dueDate     String
+  payments    String // JSON serialized Payment[]
+}
+
 model AuditEntry {
   id        String   @id
   entity    String
@@ -32,5 +126,12 @@ model AuditEntry {
   actor     String
   action    String
   reason    String?
+  createdAt DateTime @default(now())
+}
+
+model DomainEvent {
+  id        String   @id
+  name      String
+  payload   String
   createdAt DateTime @default(now())
 }

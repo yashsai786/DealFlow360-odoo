@@ -25,6 +25,7 @@ import {
   ArrowRight,
   CheckCircle2,
   Users,
+  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAppState, identityActions } from "../../infrastructure/store";
@@ -54,6 +55,13 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
     state.customers[0]?.id ?? "c-acme"
   );
   const [signupLoading, setSignupLoading] = useState(false);
+
+  // Check if entered email/id is already registered
+  const isAlreadyRegistered =
+    signupEmail.trim().length > 3 &&
+    state.users.some(
+      (u) => u.email.toLowerCase() === signupEmail.trim().toLowerCase()
+    );
 
   // Handle Login
   const handleLogin = (e: React.FormEvent) => {
@@ -104,6 +112,10 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
     }
     if (!signupPassword || signupPassword.length < 4) {
       toast.error("Password must be at least 4 characters");
+      return;
+    }
+    if (isAlreadyRegistered) {
+      toast.error("This email / ID is already registered. Please sign in instead.");
       return;
     }
 
@@ -291,6 +303,12 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
                           required
                         />
                       </div>
+                      {isAlreadyRegistered && (
+                        <p className="text-[11px] text-destructive font-medium flex items-center gap-1.5 mt-1 animate-in fade-in">
+                          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                          This email / ID is already registered.
+                        </p>
+                      )}
                     </div>
 
                     <div className="space-y-1.5">

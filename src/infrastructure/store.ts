@@ -245,7 +245,7 @@ export const identityActions = {
     const normalizedEmail = email.trim().toLowerCase();
     const existing = state.users.find((u) => u.email.toLowerCase() === normalizedEmail);
     if (existing) {
-      throw new Error("A user with this email address already exists.");
+      throw new Error("This email / ID is already registered.");
     }
     const newUser: User = {
       id: uid("u"),
@@ -265,9 +265,11 @@ export const identityActions = {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to sign up (${response.status})`);
+        const errMsg = errorData.error?.message || errorData.error || (response.status === 409 ? "This email / ID is already registered." : `Failed to sign up (${response.status})`);
+        throw new Error(errMsg);
       }
-      const createdUser = await response.json();
+      const resData = await response.json();
+      const createdUser = resData.data || resData;
       
       set({
         users: [...state.users, createdUser],
