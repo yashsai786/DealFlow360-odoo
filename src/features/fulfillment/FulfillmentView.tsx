@@ -6,6 +6,7 @@ import {
   fulfillmentActions,
   customerMap,
 } from "../../infrastructure/store";
+import { canConsolidate } from "../../modules/fulfillment/service";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -35,6 +36,8 @@ import {
   RefreshCw,
   PlusCircle,
   Boxes,
+  Sliders,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -61,6 +64,11 @@ export function FulfillmentView() {
     : null;
   const customer = quotation ? customers[quotation.customerId] : null;
   const suggestedSplit = order ? splitFor(state, order) : null;
+
+  // Automated check: Are there open backorders on this order that can now be consolidated?
+  const consolidatableBackorders = (order?.backorders || []).filter(
+    (bo) => bo.status === "OPEN" && canConsolidate(bo, state.inventory)
+  );
 
   // Accept suggested split
   const handleAcceptSplit = () => {
@@ -235,62 +243,151 @@ export function FulfillmentView() {
 
                 <div className="flex items-center gap-2">
                   {order.status !== "SHIPPED" && (
-                    <>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleOpenOverride}
-                        className="h-8 text-xs"
-                      >
-                        Manual Override
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={handleShip}
-                        disabled={order.allocations.length === 0}
-                        className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                      >
-                        <Truck className="h-3.5 w-3.5 mr-1" />
-                        Ship Order
-                      </Button>
-                    </>
+                    <Button
+                      size="sm"
+                      onClick={handleShip}
+                      disabled={order.allocations.length === 0}
+                      className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                    >
+                      <Truck className="h-3.5 w-3.5 mr-1" />
+                      Ship Order
+                    </Button>
                   )}
                 </div>
               </CardHeader>
               <CardContent className="p-4 space-y-6">
-                {/* Cost-Optimal Warehouse Split Recommendation */}
-                {suggestedSplit && order.status === "AWAITING" && (
-                  <div className="p-3.5 rounded-lg border border-primary/20 bg-primary/5 space-y-3 text-xs">
-                    <div className="flex items-center justify-between">
-                      <div className="font-semibold text-primary flex items-center gap-1.5">
-                        <Boxes className="h-4 w-4" />
-                        Recommended Least-Cost Warehouse Split
+                {/* Mid-Fulfillment Stock Arrival Prompt (Appears Automatically when stock arrives) */}
+                {consolidatableBackorders.length > 0 && (
+                  <div className="p-4 rounded-xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/30 shadow-md space-y-3 animate-in fade-in slide-in-from-top-3 duration-300">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-[10px] px-2.5 py-0.5 uppercase tracking-wider font-bold animate-pulse">
+                          ⚡ Stock Arrived Mid-Fulfillment
+                        </Badge>
+                        <span className="font-bold text-xs text-foreground">
+                          Inbound Inventory Detected for Pending Backorder
+                        </span>
                       </div>
-                      <div className="font-mono text-foreground font-medium">
-                        Shipments: {suggestedSplit.shipmentCount} · Freight Cost: ₹{suggestedSplit.shippingCost}
-                      </div>
+                      <span className="text-[11px] font-mono text-emerald-700 dark:text-emerald-300 font-semibold">
+                        Ready to Consolidate
+                      </span>
                     </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      Our greedy allocation prioritizes nearest stock with lowest freight surcharge to minimize transit emissions and cost.
+
+                    <p className="text-xs text-muted-foreground">
+                      New stock arrived at regional depots mid-fulfillment! Available on-hand inventory is now sufficient to eliminate remaining backorders and fulfill the order in full without delivery delays.
                     </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {suggestedSplit.allocations.map((a, i) => {
-                        const wh = state.warehouses.find((w) => w.id === a.warehouseId);
-                        const prod = products[a.productId];
+
+                    <div className="space-y-2 pt-1">
+                      {consolidatableBackorders.map((bo) => {
+                        const prod = products[bo.productId];
+                        const freeStock = state.inventory
+                          .filter((i) => i.productId === bo.productId)
+                          .reduce((s, i) => s + Math.max(0, i.available - i.reserved), 0);
                         return (
-                          <div key={i} className="p-2 rounded bg-background border border-border text-[11px] space-y-0.5">
-                            <div className="font-semibold text-foreground">{wh?.name}</div>
-                            <div className="text-muted-foreground">
-                              {prod?.name}: <strong className="text-primary">{a.qty} units</strong>
+                          <div
+                            key={bo.id}
+                            className="p-3 rounded-lg bg-background border border-emerald-300 dark:border-emerald-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs"
+                          >
+                            <div>
+                              <div className="font-semibold text-foreground flex items-center gap-2">
+                                <span>{prod?.name || bo.productId}</span>
+                                <Badge variant="outline" className="text-[10px] font-mono text-emerald-600 border-emerald-400">
+                                  {bo.qty} Units On Backorder
+                                </Badge>
+                              </div>
+                              <div className="text-[11px] text-muted-foreground mt-0.5">
+                                Available free depot inventory: <strong className="text-emerald-600 font-mono">{freeStock} units</strong>
+                              </div>
                             </div>
-                            <div className="text-[10px] text-muted-foreground">Freight: ₹{a.shipmentCost}</div>
+                            <Button
+                              size="sm"
+                              onClick={() => handleConsolidate(bo.id)}
+                              className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-xs"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                              Consolidate Remaining Backorder
+                            </Button>
                           </div>
                         );
                       })}
                     </div>
-                    <div className="flex justify-end pt-1">
-                      <Button size="sm" onClick={handleAcceptSplit} className="h-7 text-xs">
-                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                  </div>
+                )}
+
+                {/* Cost-Optimal Warehouse Split Recommendation (B6) */}
+                {suggestedSplit && order.status !== "SHIPPED" && (
+                  <div className="p-4 rounded-xl border border-primary/30 bg-primary/5 space-y-3.5 text-xs shadow-xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-primary/20 pb-3">
+                      <div>
+                        <div className="font-semibold text-primary flex items-center gap-1.5 text-sm">
+                          <Boxes className="h-4 w-4" />
+                          Recommended Warehouse Split (Live Stock Optimal)
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Greedy cost-optimal allocation selects nearest depot stock with lowest freight surcharge to minimize transit emissions and cost.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="font-mono text-xs bg-background">
+                          {suggestedSplit.shipmentCount} {suggestedSplit.shipmentCount === 1 ? "Shipment" : "Shipments"}
+                        </Badge>
+                        <Badge className="font-mono text-xs bg-primary text-primary-foreground">
+                          Est. Freight: ₹{suggestedSplit.shippingCost.toLocaleString()}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {/* Displays: Warehouse name, Quantity fulfilled from that warehouse, freight */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                      {suggestedSplit.allocations.map((a, i) => {
+                        const wh = state.warehouses.find((w) => w.id === a.warehouseId);
+                        const prod = products[a.productId];
+                        return (
+                          <div key={i} className="p-3 rounded-lg bg-background border border-border text-xs space-y-1 shadow-xs">
+                            <div className="flex items-center justify-between font-semibold text-foreground">
+                              <span>{wh?.name}</span>
+                              <span className="text-[10px] text-muted-foreground font-mono">₹{a.shipmentCost} freight</span>
+                            </div>
+                            <div className="text-[11px] text-muted-foreground">{wh?.location}</div>
+                            <div className="pt-1 text-[11px] text-foreground border-t border-border/60 flex items-center justify-between">
+                              <span className="truncate">{prod?.name}</span>
+                              <strong className="text-primary font-mono ml-1">{a.qty} units</strong>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Shortage notice if total stock < order requirements */}
+                    {suggestedSplit.shortages.length > 0 && (
+                      <div className="p-2.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                          <span>
+                            Depot Shortage: {suggestedSplit.shortages.map((s) => `${s.qty} × ${products[s.productId]?.name || s.productId}`).join(", ")} will be placed on Backorder until inbound replenishment.
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-semibold">Auto-Backorder</span>
+                      </div>
+                    )}
+
+                    {/* B6 Action Buttons: Accept Suggested Split & Manual Override side-by-side */}
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-primary/20">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleOpenOverride}
+                        className="h-8 text-xs bg-background hover:bg-muted"
+                      >
+                        <Sliders className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
+                        Manual Override
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={handleAcceptSplit}
+                        className="h-8 text-xs bg-primary text-primary-foreground font-semibold shadow-xs"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
                         Accept Suggested Split
                       </Button>
                     </div>
@@ -342,9 +439,14 @@ export function FulfillmentView() {
                 {/* Backorders Section */}
                 {order.backorders.length > 0 && (
                   <div className="space-y-2">
-                    <div className="text-xs font-semibold text-rose-600 flex items-center gap-1.5">
-                      <AlertCircle className="h-3.5 w-3.5" />
-                      Active Backorders (Insufficient Depot Stock)
+                    <div className="text-xs font-semibold text-rose-600 flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <AlertCircle className="h-3.5 w-3.5" />
+                        Pending Backorders (Pending Inbound Stock)
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">
+                        Consolidation prompt triggers automatically when stock arrives
+                      </span>
                     </div>
                     <div className="space-y-2">
                       {order.backorders.map((bo) => {
@@ -360,11 +462,18 @@ export function FulfillmentView() {
                             className="p-3 rounded-lg border border-rose-200 dark:border-rose-950 bg-rose-50/40 dark:bg-rose-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
                           >
                             <div>
-                              <div className="font-semibold text-rose-800 dark:text-rose-300">
-                                {bo.qty} × {prod?.name} ({bo.status})
+                              <div className="font-semibold text-rose-800 dark:text-rose-300 flex items-center gap-2">
+                                <span>{bo.qty} × {prod?.name}</span>
+                                <Badge variant={bo.status === "OPEN" ? "destructive" : "secondary"} className="text-[9px] uppercase">
+                                  {bo.status}
+                                </Badge>
                               </div>
-                              <p className="text-[11px] text-muted-foreground">
-                                Free available across depots: {freeStock} units
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                Free stock in depots:{" "}
+                                <span className={freeStock >= bo.qty ? "text-emerald-600 font-bold font-mono" : "text-rose-600 font-bold font-mono"}>
+                                  {freeStock} units
+                                </span>{" "}
+                                (Required: {bo.qty})
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
@@ -372,7 +481,7 @@ export function FulfillmentView() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleReplenish("wh-main", bo.productId, bo.qty)}
-                                className="h-7 text-[10px]"
+                                className="h-7 text-[11px] border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300"
                               >
                                 <PlusCircle className="h-3 w-3 mr-1 text-emerald-600" />
                                 Simulate +{bo.qty} Inbound
@@ -381,7 +490,9 @@ export function FulfillmentView() {
                                 size="sm"
                                 disabled={!canCons}
                                 onClick={() => handleConsolidate(bo.id)}
-                                className="h-7 text-[10px]"
+                                className={`h-7 text-[11px] ${
+                                  canCons ? "bg-emerald-600 hover:bg-emerald-700 text-white font-semibold" : ""
+                                }`}
                               >
                                 <RefreshCw className="h-3 w-3 mr-1" />
                                 Consolidate Backorder

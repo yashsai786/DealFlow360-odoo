@@ -717,7 +717,15 @@ export const fulfillmentActions = {
     if (plan.allocations.length === 0)
       throw InsufficientStock("No stock is currently available to allocate for this order.");
 
-    const inventory = state.inventory.map((item) => {
+    // First unreserve any previous allocations for this order
+    const baseInventory = state.inventory.map((item) => {
+      const prevAllocated = order.allocations
+        .filter((a) => a.warehouseId === item.warehouseId && a.productId === item.productId)
+        .reduce((sum, a) => sum + a.qty, 0);
+      return prevAllocated ? { ...item, reserved: Math.max(0, item.reserved - prevAllocated) } : item;
+    });
+
+    const inventory = baseInventory.map((item) => {
       const allocated = plan.allocations
         .filter((a) => a.warehouseId === item.warehouseId && a.productId === item.productId)
         .reduce((sum, a) => sum + a.qty, 0);
@@ -751,8 +759,17 @@ export const fulfillmentActions = {
     assertCan(user.role, "fulfillment.manage");
     const order = state.orders.find((o) => o.id === orderId);
     if (!order) return;
+
+    // First unreserve any previous allocations for this order to calculate true free stock
+    const baseInventory = state.inventory.map((item) => {
+      const prevAllocated = order.allocations
+        .filter((a) => a.warehouseId === item.warehouseId && a.productId === item.productId)
+        .reduce((sum, a) => sum + a.qty, 0);
+      return prevAllocated ? { ...item, reserved: Math.max(0, item.reserved - prevAllocated) } : item;
+    });
+
     for (const a of allocations) {
-      const item = state.inventory.find(
+      const item = baseInventory.find(
         (i) => i.warehouseId === a.warehouseId && i.productId === a.productId,
       );
       const free = (item?.available ?? 0) - (item?.reserved ?? 0);
@@ -781,7 +798,7 @@ export const fulfillmentActions = {
 
     state = {
       ...state,
-      inventory: state.inventory.map((item) => {
+      inventory: baseInventory.map((item) => {
         const allocated = enriched
           .filter((a) => a.warehouseId === item.warehouseId && a.productId === item.productId)
           .reduce((sum, a) => sum + a.qty, 0);

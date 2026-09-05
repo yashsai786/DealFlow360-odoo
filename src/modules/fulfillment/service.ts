@@ -33,7 +33,7 @@ export function calculateWarehouseSplit(
   );
 
   for (const line of physicalLines) {
-    let remaining = line.qty;
+    let remaining = Number(line.qty ?? (line as any).quantity) || 1;
     const options = inventory
       .filter((i) => i.productId === line.productId && i.available - i.reserved > 0)
       .sort((a, b) => {
