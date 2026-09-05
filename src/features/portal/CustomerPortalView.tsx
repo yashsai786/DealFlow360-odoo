@@ -1,25 +1,17 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   useAppState,
   productMap,
   customerMap,
   totalsOf,
   negotiationActions,
-  quotationActions,
 } from "../../infrastructure/store";
-import { stageLabel, lineNet } from "../../modules/quotations/service";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "../../components/ui/card";
+import type { Quotation } from "../../modules/shared/types";
+import { lineNet } from "../../modules/quotations/service";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../../components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -36,10 +28,63 @@ import {
   FileText,
   MessageSquare,
   Send,
-  Sparkles,
   ShieldCheck,
+  AlertTriangle,
+  ArrowRight,
+  TrendingDown,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
+
+/**
+ * Maps internal quotation stages to clean customer-facing statuses (B8 specification):
+ * - Sent: Newly issued proposal ready for customer review
+ * - Under Negotiation: Customer submitted counter-discounts or change requests
+ * - Under Review: Exceeds discount ceilings, pending managerial sign-off
+ * - Confirmed: Finalized order moving to fulfillment
+ */
+export function getCustomerStatus(quotation: Quotation): {
+  label: "Sent" | "Under Negotiation" | "Under Review" | "Confirmed";
+  variant: "default" | "secondary" | "outline";
+  badgeClass: string;
+  description: string;
+} {
+  if (
+    quotation.stage === "CONFIRMED" ||
+    quotation.stage === "FULFILLMENT" ||
+    quotation.stage === "INVOICED" ||
+    quotation.stage === "PAID"
+  ) {
+    return {
+      label: "Confirmed",
+      variant: "default",
+      badgeClass: "bg-emerald-600 hover:bg-emerald-600 text-white font-semibold",
+      description: "Quotation signed & accepted. Transferred to warehouse fulfillment.",
+    };
+  }
+  if (quotation.stage === "PENDING_APPROVAL") {
+    return {
+      label: "Under Review",
+      variant: "outline",
+      badgeClass: "border-amber-500 text-amber-600 dark:text-amber-400 font-semibold bg-amber-50 dark:bg-amber-950/30",
+      description: "Counter-discount terms submitted for internal executive sign-off.",
+    };
+  }
+  if (quotation.stage === "NEGOTIATION" || quotation.requests.some((r) => r.status === "OPEN")) {
+    return {
+      label: "Under Negotiation",
+      variant: "secondary",
+      badgeClass: "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 font-semibold border border-indigo-300 dark:border-indigo-800",
+      description: "Revision requests submitted. Awaiting sales account executive review.",
+    };
+  }
+  return {
+    label: "Sent",
+    variant: "outline",
+    badgeClass: "border-sky-500 text-sky-600 dark:text-sky-400 font-semibold bg-sky-50 dark:bg-sky-950/30",
+    description: "Commercial proposal active and ready for your sign-off or counter-offer.",
+  };
+}
 
 export function CustomerPortalView() {
   const state = useAppState();
@@ -47,7 +92,7 @@ export function CustomerPortalView() {
   const customers = customerMap(state);
   const session = state.session;
 
-  // Strict Customer Isolation: only allow quotations belonging to this customer
+  // Strict Customer Isolation: show only quotations belonging to this customer
   const myCustomerId = session?.customerId ?? "c-acme";
   const customer = customers[myCustomerId];
   const myQuotations = state.quotations.filter((q) => q.customerId === myCustomerId);
@@ -55,55 +100,139 @@ export function CustomerPortalView() {
   const [selectedQuoteId, setSelectedQuoteId] = useState<string>(
     myQuotations[0]?.id ?? "",
   );
+
+  // Sync selectedQuoteId if list changes
+  useEffect(() => {
+    if (!selectedQuoteId && myQuotations.length > 0) {
+      setSelectedQuoteId(myQuotations[0]!.id);
+    }
+  }, [myQuotations, selectedQuoteId]);
+
   const quotation = myQuotations.find((q) => q.id === selectedQuoteId);
   const totals = quotation ? totalsOf(state, quotation) : null;
+  const statusInfo = quotation ? getCustomerStatus(quotation) : null;
+  const isLocked =
+    quotation?.stage === "CONFIRMED" ||
+    quotation?.stage === "FULFILLMENT" ||
+    quotation?.stage === "INVOICED" ||
+    quotation?.stage === "PAID";
 
-  // Negotiation form state
-  const [discountModal, setDiscountModal] = useState<{
-    open: boolean;
-    lineId: string;
-    productName: string;
-    currentDiscount: number;
-    requestedDiscount: number;
-    note: string;
-  }>({
-    open: false,
-    lineId: "",
-    productName: "",
-    currentDiscount: 0,
-    requestedDiscount: 0,
-    note: "",
-  });
+  // Line-level counter proposals and comments state
+  const [lineProposals, setLineProposals] = useState<
+    Record<string, { counterDiscount: number; note: string }>
+  >({});
+  const [overallComment, setOverallComment] = useState("");
+  const [targetDeliveryDate, setTargetDeliveryDate] = useState("");
+  const [chatMessage, setChatMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [deliveryDate, setDeliveryDate] = useState<string>(
-    quotation?.requestedDeliveryDate ?? "",
-  );
-  const [chatMessage, setChatMessage] = useState<string>("");
-
-  // Submit discount counter-offer
-  const handleSubmitCounterOffer = () => {
+  // Reset proposals when active quotation changes
+  useEffect(() => {
     if (!quotation) return;
+    const initial: Record<string, { counterDiscount: number; note: string }> = {};
+    for (const line of quotation.lines) {
+      const openReq = quotation.requests.find((r) => r.lineId === line.id && r.status === "OPEN");
+      initial[line.id] = {
+        counterDiscount: openReq ? openReq.requestedDiscountPct : line.discountPct,
+        note: openReq?.note ?? "",
+      };
+    }
+    setLineProposals(initial);
+    setTargetDeliveryDate(quotation.requestedDeliveryDate ?? "");
+    setOverallComment("");
+  }, [quotation?.id]);
+
+  // Handle counter-discount change on a line
+  const handleDiscountChange = (lineId: string, val: number) => {
+    const clamped = Math.max(0, Math.min(100, isNaN(val) ? 0 : val));
+    setLineProposals((prev) => ({
+      ...prev,
+      [lineId]: {
+        counterDiscount: clamped,
+        note: prev[lineId]?.note ?? "",
+      },
+    }));
+  };
+
+  // Handle line note change
+  const handleNoteChange = (lineId: string, note: string) => {
+    setLineProposals((prev) => ({
+      ...prev,
+      [lineId]: {
+        counterDiscount: prev[lineId]?.counterDiscount ?? 0,
+        note,
+      },
+    }));
+  };
+
+  // Button 1: Submit Request (B8 requirement)
+  const handleSubmitRequest = () => {
+    if (!quotation) return;
+
+    // Collect lines where counter discount differs from original offered discount or has a note
+    const changedRequests: { lineId: string; requestedDiscountPct: number; note: string }[] = [];
+    for (const line of quotation.lines) {
+      const prop = lineProposals[line.id];
+      if (prop && (prop.counterDiscount !== line.discountPct || prop.note.trim().length > 0)) {
+        changedRequests.push({
+          lineId: line.id,
+          requestedDiscountPct: prop.counterDiscount,
+          note: prop.note.trim() || `Requested ${prop.counterDiscount}% discount (offered: ${line.discountPct}%)`,
+        });
+      }
+    }
+
+    if (changedRequests.length === 0 && !overallComment.trim() && !targetDeliveryDate) {
+      toast.info("Please enter a counter discount or comment before submitting.");
+      return;
+    }
+
     try {
       negotiationActions.submitRequest(
         quotation.id,
-        [
-          {
-            lineId: discountModal.lineId,
-            requestedDiscountPct: discountModal.requestedDiscount,
-            note: discountModal.note,
-          },
-        ],
-        discountModal.note,
-        deliveryDate || undefined,
+        changedRequests.length > 0
+          ? changedRequests
+          : quotation.lines.map((l) => ({
+              lineId: l.id,
+              requestedDiscountPct: lineProposals[l.id]?.counterDiscount ?? l.discountPct,
+              note: overallComment.trim() || "General terms adjustment requested.",
+            })),
+        overallComment.trim() || "Customer submitted negotiation counter-proposals.",
+        targetDeliveryDate || undefined,
       );
-      toast.success("Negotiation request submitted to your sales account team.");
-      setDiscountModal({ ...discountModal, open: false });
+
+      toast.success("Negotiation request submitted! Your proposal status is now 'Under Negotiation'.");
+      setOverallComment("");
     } catch (err: any) {
-      toast.error(err.message || "Failed to submit negotiation");
+      toast.error(err.message || "Failed to submit negotiation request");
     }
   };
 
-  // Send message
+  // Button 2: Confirm Quotation (B8 requirement & smart routing)
+  const handleConfirmQuotation = async () => {
+    if (!quotation) return;
+    setIsSubmitting(true);
+    try {
+      const res = await negotiationActions.customerConfirm(quotation.id);
+      if (res.routedTo === "APPROVAL") {
+        toast.warning(
+          `Quotation terms accepted! However, final counter-terms exceed governance ceilings (${res.riskLevel} risk). Automatically routed to B4 Manager & Finance Approval Queue.`,
+          { duration: 6000 },
+        );
+      } else {
+        toast.success(
+          "Quotation Confirmed! Your order has been scheduled and moved directly to warehouse fulfillment.",
+          { duration: 5000 },
+        );
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Quotation confirmation failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Discussion reply
   const handleSendMessage = () => {
     if (!quotation || !chatMessage.trim()) return;
     try {
@@ -115,38 +244,22 @@ export function CustomerPortalView() {
     }
   };
 
-  // Confirm quotation from customer end
-  const handleCustomerAccept = () => {
-    if (!quotation) return;
-    try {
-      quotationActions.confirm(quotation.id);
-      toast.success("Quotation accepted! Your order has been scheduled for dispatch.");
-    } catch (err: any) {
-      toast.error(err.message || "Acceptance failed");
-    }
-  };
-
-  // Internal review simulator (shows how sales rep responds and triggers re-approval)
-  const handleInternalRespond = (requestId: string, accept: boolean) => {
-    if (!quotation) return;
-    try {
-      const res = negotiationActions.respond(
-        quotation.id,
-        requestId,
-        accept,
-        accept ? "Counter terms approved by sales." : "Cannot honor requested terms.",
-      );
-      if (res?.reapproval) {
-        toast.warning(
-          `Counter discount accepted! New terms exceed category ceiling, triggering automated RE-APPROVAL at ${res.evaluation.riskLevel} risk!`,
-        );
-      } else {
-        toast.success(accept ? "Counter discount accepted." : "Counter discount declined.");
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Action failed");
-    }
-  };
+  // Calculate proposed totals preview
+  const proposedTotals = quotation
+    ? quotation.lines.reduce(
+        (acc, l) => {
+          const p = products[l.productId];
+          const unitPrice = l.unitPrice;
+          const disc = lineProposals[l.id]?.counterDiscount ?? l.discountPct;
+          const lineTotal = Math.round(l.qty * unitPrice * (1 - disc / 100));
+          return {
+            gross: acc.gross + l.qty * unitPrice,
+            net: acc.net + lineTotal,
+          };
+        },
+        { gross: 0, net: 0 },
+      )
+    : null;
 
   return (
     <div className="space-y-6">
@@ -158,67 +271,67 @@ export function CustomerPortalView() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-foreground">{customer?.name}</h1>
+              <h1 className="text-lg font-bold text-foreground">{customer?.name ?? "Enterprise Account"}</h1>
               <Badge variant="secondary" className="text-[10px] font-mono">
-                {customer?.tier} Account Tier
+                {customer?.tier ?? "Commercial"} Account Tier
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground">
-              Customer Contact: {session?.name} ({session?.email}) · Secure Procurement Portal
+              Customer Procurement Portal · Logged in as {session?.name} ({session?.email})
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1 text-xs text-muted-foreground bg-muted/40 px-3 py-1.5 rounded-lg border border-border">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 px-3 py-1.5 rounded-lg border border-border">
           <ShieldCheck className="h-4 w-4 text-emerald-600" />
-          <span>Restricted Data View (Internal margins & audits protected)</span>
+          <span>Customer-Facing Secure Workspace</span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Col: Customer Quotations */}
-        <Card className="shadow-xs">
+        {/* Left Col: Customer Proposals List */}
+        <Card className="shadow-xs border-border">
           <CardHeader className="p-4 pb-2 border-b border-border">
             <CardTitle className="text-xs font-semibold flex items-center gap-1.5">
               <FileText className="h-4 w-4 text-primary" />
-              Your Commercial Proposals ({myQuotations.length})
+              Commercial Proposals ({myQuotations.length})
             </CardTitle>
+            <CardDescription className="text-[11px]">
+              Select a quote to review terms or propose adjustments
+            </CardDescription>
           </CardHeader>
           <CardContent className="p-2 space-y-1.5">
             {myQuotations.map((q) => {
               const active = q.id === selectedQuoteId;
               const qTotals = totalsOf(state, q);
+              const qStatus = getCustomerStatus(q);
 
               return (
                 <div
                   key={q.id}
                   onClick={() => setSelectedQuoteId(q.id)}
-                  className={`p-2.5 rounded-lg border text-xs cursor-pointer transition-colors ${
-                    active ? "border-primary bg-primary/5 shadow-xs" : "border-border hover:bg-muted/40"
+                  className={`p-3 rounded-lg border text-xs cursor-pointer transition-all ${
+                    active
+                      ? "border-primary bg-primary/5 shadow-xs ring-1 ring-primary/20"
+                      : "border-border hover:bg-muted/40"
                   }`}
                 >
                   <div className="flex items-center justify-between font-semibold">
-                    <span className="font-mono text-primary">{q.number}</span>
-                    <Badge
-                      variant={
-                        q.stage === "APPROVED" || q.stage === "PAID"
-                          ? "secondary"
-                          : q.stage === "PENDING_APPROVAL"
-                            ? "outline"
-                            : "outline"
-                      }
-                      className="text-[9px] uppercase font-mono py-0 px-1"
-                    >
-                      {stageLabel(q.stage)}
+                    <span className="font-mono text-primary font-bold">{q.number}</span>
+                    <Badge className={`text-[10px] px-1.5 py-0 uppercase ${qStatus.badgeClass}`}>
+                      {qStatus.label}
                     </Badge>
                   </div>
-                  <div className="text-[11px] text-muted-foreground mt-1">
-                    {q.lines.length} items · Total Contract: ₹{qTotals.total.toLocaleString()}
+                  <div className="text-[11px] text-muted-foreground mt-1 flex justify-between">
+                    <span>{q.lines.length} line items</span>
+                    <span className="font-semibold text-foreground font-mono">
+                      ₹{qTotals.total.toLocaleString()}
+                    </span>
                   </div>
-                  <div className="text-[10px] text-muted-foreground mt-1 flex justify-between">
+                  <div className="text-[10px] text-muted-foreground mt-1 flex justify-between items-center pt-1 border-t border-border/40">
                     <span>Issued: {new Date(q.createdAt).toLocaleDateString()}</span>
-                    {q.requests.length > 0 && (
-                      <span className="text-amber-600 font-medium">
-                        {q.requests.length} open negotiation request
+                    {q.requests.some((r) => r.status === "OPEN") && (
+                      <span className="text-indigo-600 dark:text-indigo-400 font-medium">
+                        Active revision
                       </span>
                     )}
                   </div>
@@ -226,112 +339,198 @@ export function CustomerPortalView() {
               );
             })}
             {myQuotations.length === 0 && (
-              <p className="text-xs text-muted-foreground py-6 text-center">No proposals found.</p>
+              <p className="text-xs text-muted-foreground py-8 text-center">No proposals found for your account.</p>
             )}
           </CardContent>
         </Card>
 
         {/* Right 2 Cols: Quotation Negotiation & Line Review */}
         <div className="lg:col-span-2 space-y-6">
-          {quotation && totals ? (
+          {quotation && totals && statusInfo ? (
             <>
-              <Card className="shadow-xs">
-                <CardHeader className="p-4 border-b border-border flex flex-row items-center justify-between">
+              <Card className="shadow-xs border-border">
+                {/* Header with Status & Primary Action Buttons */}
+                <CardHeader className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <CardTitle className="text-base font-bold font-mono text-primary">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <CardTitle className="text-lg font-bold font-mono text-primary">
                         {quotation.number}
                       </CardTitle>
-                      <Badge variant="outline" className="text-xs font-mono uppercase">
-                        {stageLabel(quotation.stage)}
+                      <Badge className={`text-xs px-2 py-0.5 uppercase ${statusInfo.badgeClass}`}>
+                        {statusInfo.label}
                       </Badge>
                     </div>
-                    <CardDescription className="text-xs mt-0.5">
-                      Net Total: <strong className="text-foreground">₹{totals.total.toLocaleString()}</strong> (Includes ₹{totals.tax.toLocaleString()} tax)
+                    <CardDescription className="text-xs mt-1 text-muted-foreground">
+                      {statusInfo.description}
                     </CardDescription>
                   </div>
 
-                  {/* Customer Confirm Action */}
-                  {quotation.stage === "APPROVED" && (
-                    <Button
-                      size="sm"
-                      onClick={handleCustomerAccept}
-                      className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                      Sign & Accept Proposal
-                    </Button>
-                  )}
+                  {/* Primary B8 Buttons: Submit Request & Confirm Quotation */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {!isLocked && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleSubmitRequest}
+                        className="h-8 text-xs flex items-center gap-1.5 border-indigo-300 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        Submit Request
+                      </Button>
+                    )}
+
+                    {!isLocked ? (
+                      <Button
+                        size="sm"
+                        disabled={isSubmitting}
+                        onClick={handleConfirmQuotation}
+                        className="h-8 text-xs flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs font-semibold"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        {isSubmitting ? "Processing..." : "Confirm Quotation"}
+                      </Button>
+                    ) : (
+                      <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 text-xs py-1 px-2.5 flex items-center gap-1">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                        Order Confirmed
+                      </Badge>
+                    )}
+                  </div>
                 </CardHeader>
+
                 <CardContent className="p-4 space-y-6">
-                  {/* Lines Table with Negotiation Actions */}
+                  {/* Proposal Summary Bar */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-lg bg-muted/30 border border-border text-xs">
+                    <div>
+                      <span className="text-muted-foreground text-[10px] block uppercase font-medium">Issue Date</span>
+                      <span className="font-medium text-foreground">{new Date(quotation.createdAt).toLocaleDateString()}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground text-[10px] block uppercase font-medium">Target Delivery</span>
+                      {isLocked ? (
+                        <span className="font-medium text-foreground">{quotation.requestedDeliveryDate || "Standard (7-10 days)"}</span>
+                      ) : (
+                        <Input
+                          type="date"
+                          value={targetDeliveryDate}
+                          onChange={(e) => setTargetDeliveryDate(e.target.value)}
+                          className="h-6 text-[11px] p-1 bg-background mt-0.5"
+                        />
+                      )}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground text-[10px] block uppercase font-medium">Current Total</span>
+                      <span className="font-bold text-foreground font-mono">₹{totals.total.toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground text-[10px] block uppercase font-medium">Payment Terms</span>
+                      <span className="font-medium text-foreground">Net 30 Days</span>
+                    </div>
+                  </div>
+
+                  {/* Line Items Table with Counter Discount Proposal Field (B8) */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <div className="text-xs font-semibold text-foreground">Commercial Equipment & Services</div>
-                      <span className="text-[11px] text-muted-foreground">Click "Request Revision" to counter</span>
+                      <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <span>Commercial Equipment & Line Items</span>
+                        <span className="text-[11px] font-normal text-muted-foreground">
+                          (Propose line-level counter discounts below)
+                        </span>
+                      </div>
+                      {proposedTotals && proposedTotals.net !== totals.total && (
+                        <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium flex items-center gap-1">
+                          <TrendingDown className="h-3.5 w-3.5" />
+                          Proposed Net: ₹{proposedTotals.net.toLocaleString()}
+                        </div>
+                      )}
                     </div>
-                    <div className="rounded-md border border-border overflow-hidden">
+
+                    <div className="rounded-lg border border-border overflow-hidden">
                       <Table>
                         <TableHeader>
-                          <TableRow className="text-[11px]">
+                          <TableRow className="bg-muted/40 text-[11px]">
                             <TableHead>Product / Service</TableHead>
                             <TableHead className="text-right">Qty</TableHead>
                             <TableHead className="text-right">List Price</TableHead>
                             <TableHead className="text-right">Offered Discount</TableHead>
+                            <TableHead className="text-right w-36">Counter Discount Proposal</TableHead>
                             <TableHead className="text-right">Net Price</TableHead>
-                            <TableHead className="text-right w-28">Negotiate</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody className="text-xs">
                           {quotation.lines.map((l) => {
                             const p = products[l.productId];
                             const net = lineNet(l);
-                            const req = quotation.requests.find(
-                              (r) => r.lineId === l.id && r.status === "OPEN",
-                            );
+                            const proposal = lineProposals[l.id] ?? {
+                              counterDiscount: l.discountPct,
+                              note: "",
+                            };
+                            const isChanged = proposal.counterDiscount !== l.discountPct;
 
                             return (
-                              <TableRow key={l.id}>
-                                <TableCell>
-                                  <div className="font-medium">{p?.name}</div>
-                                  <div className="text-[10px] text-muted-foreground">{p?.description}</div>
-                                </TableCell>
-                                <TableCell className="text-right font-mono">{l.qty}</TableCell>
-                                <TableCell className="text-right font-mono text-muted-foreground">
-                                  ₹{l.unitPrice}
-                                </TableCell>
-                                <TableCell className="text-right font-mono font-bold text-emerald-600">
-                                  {l.discountPct}% off
-                                </TableCell>
-                                <TableCell className="text-right font-mono font-bold">
-                                  ₹{net.toLocaleString()}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {req ? (
-                                    <Badge variant="outline" className="text-[10px] font-mono text-amber-600">
-                                      Req: {req.requestedDiscountPct}%
-                                    </Badge>
-                                  ) : (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() =>
-                                        setDiscountModal({
-                                          open: true,
-                                          lineId: l.id,
-                                          productName: p?.name ?? "Product",
-                                          currentDiscount: l.discountPct,
-                                          requestedDiscount: l.discountPct + 4,
-                                          note: "",
-                                        })
-                                      }
-                                      className="h-6 text-[10px] px-2"
-                                    >
-                                      Request Revision
-                                    </Button>
-                                  )}
-                                </TableCell>
-                              </TableRow>
+                              <React.Fragment key={l.id}>
+                                <TableRow className={isChanged ? "bg-indigo-50/40 dark:bg-indigo-950/20" : ""}>
+                                  <TableCell className="font-medium">
+                                    <div className="text-foreground">{p?.name ?? l.productId}</div>
+                                    <div className="text-[10px] text-muted-foreground line-clamp-1">{p?.description}</div>
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono">{l.qty}</TableCell>
+                                  <TableCell className="text-right font-mono text-muted-foreground">
+                                    ₹{l.unitPrice.toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono font-medium text-emerald-600 dark:text-emerald-400">
+                                    {l.discountPct}% off
+                                  </TableCell>
+
+                                  {/* Counter Discount Proposal Field (B8) */}
+                                  <TableCell className="text-right">
+                                    {isLocked ? (
+                                      <span className="font-mono font-bold text-foreground">
+                                        {proposal.counterDiscount}%
+                                      </span>
+                                    ) : (
+                                      <div className="flex items-center justify-end gap-1">
+                                        <div className="relative w-20">
+                                          <Input
+                                            type="number"
+                                            min={0}
+                                            max={100}
+                                            value={proposal.counterDiscount}
+                                            onChange={(e) =>
+                                              handleDiscountChange(l.id, parseFloat(e.target.value))
+                                            }
+                                            className="h-7 text-xs text-right font-mono font-bold pr-5 bg-background"
+                                          />
+                                          <span className="absolute right-2 top-1.5 text-[11px] text-muted-foreground">%</span>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </TableCell>
+
+                                  <TableCell className="text-right font-mono font-bold text-foreground">
+                                    ₹{net.toLocaleString()}
+                                  </TableCell>
+                                </TableRow>
+
+                                {/* Line-level Comment and Change Request Tool */}
+                                {!isLocked && (
+                                  <TableRow className="bg-muted/10 border-b border-border/60">
+                                    <TableCell colSpan={6} className="py-1.5 px-4">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                                          Line Note / Comment:
+                                        </span>
+                                        <Input
+                                          placeholder={`e.g. Budget ceiling requires ${proposal.counterDiscount}% on ${p?.name || "this item"}...`}
+                                          value={proposal.note}
+                                          onChange={(e) => handleNoteChange(l.id, e.target.value)}
+                                          className="h-6 text-[11px] bg-background/80"
+                                        />
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                              </React.Fragment>
                             );
                           })}
                         </TableBody>
@@ -339,72 +538,48 @@ export function CustomerPortalView() {
                     </div>
                   </div>
 
-                  {/* Active Negotiation Requests & Internal Rep Response Simulator */}
-                  {quotation.requests.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="text-xs font-semibold text-foreground flex items-center justify-between">
-                        <span>Active Term Change Requests</span>
-                        <span className="text-[10px] text-muted-foreground">
-                          (Sales review simulation controls available below)
-                        </span>
-                      </div>
-                      <div className="space-y-2">
-                        {quotation.requests.map((r) => {
-                          const line = quotation.lines.find((l) => l.id === r.lineId);
-                          const prod = products[line?.productId ?? ""];
-                          return (
-                            <div
-                              key={r.id}
-                              className="p-3 rounded-lg border border-border bg-card text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                            >
-                              <div>
-                                <div className="font-semibold text-foreground">
-                                  {prod?.name}: Requested {r.requestedDiscountPct}% Discount (Currently {line?.discountPct}%)
-                                </div>
-                                <p className="text-[11px] text-muted-foreground mt-0.5 italic">
-                                  "{r.note}"
-                                </p>
-                                <div className="text-[10px] text-muted-foreground mt-1">
-                                  Status: <strong className="font-mono">{r.status}</strong> · Submitted: {new Date(r.at).toLocaleDateString()}
-                                </div>
-                              </div>
-
-                              {r.status === "OPEN" && (
-                                <div className="flex items-center gap-1.5 bg-muted/40 p-1.5 rounded-md border border-border">
-                                  <span className="text-[10px] text-muted-foreground font-medium">
-                                    Sales Rep Action:
-                                  </span>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleInternalRespond(r.id, false)}
-                                    className="h-6 text-[10px] text-destructive"
-                                  >
-                                    Decline
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleInternalRespond(r.id, true)}
-                                    className="h-6 text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white"
-                                  >
-                                    Accept (Re-evaluates Risk)
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                  {/* General Procurement Comment */}
+                  {!isLocked && (
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <MessageSquare className="h-3.5 w-3.5 text-primary" />
+                        Procurement Justification & Message to Account Executive
+                      </label>
+                      <Input
+                        placeholder="e.g. Seeking bulk procurement approval for Q3 budget. Ready to sign if counter terms are approved."
+                        value={overallComment}
+                        onChange={(e) => setOverallComment(e.target.value)}
+                        className="text-xs h-8 bg-background"
+                      />
                     </div>
                   )}
 
-                  {/* Negotiation Discussion Thread */}
-                  <div className="space-y-3 pt-2 border-t border-border">
-                    <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <MessageSquare className="h-3.5 w-3.5 text-primary" />
-                      Direct Account Discussion & Messages
+                  {/* Smart Confirmation Info Box */}
+                  <div className="p-3 rounded-lg border border-border bg-muted/30 text-xs flex items-start gap-2.5">
+                    <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                    <div className="space-y-1 text-muted-foreground text-[11px] leading-relaxed">
+                      <strong className="text-foreground">Automated Contract Governance:</strong>
+                      <p>
+                        When you click <strong className="text-foreground">"Confirm Quotation"</strong>:
+                        If agreed terms are within standard account guidelines, your order moves directly to <strong>Warehouse Fulfillment</strong>.
+                        If custom counter-discounts exceed policy ceilings, the proposal automatically re-enters internal <strong>Executive & Finance Approval</strong> for priority sign-off.
+                      </p>
                     </div>
-                    <div className="space-y-2 max-h-56 overflow-y-auto p-3 rounded-lg border border-border bg-muted/20">
+                  </div>
+
+                  {/* Direct Account Discussion Thread */}
+                  <div className="space-y-3 pt-3 border-t border-border">
+                    <div className="text-xs font-semibold text-foreground flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <MessageSquare className="h-3.5 w-3.5 text-primary" />
+                        <span>Direct Account Messages & History</span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">
+                        {quotation.messages.length} messages exchanged
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 max-h-52 overflow-y-auto p-3 rounded-lg border border-border bg-muted/20">
                       {quotation.messages.map((m) => (
                         <div
                           key={m.id}
@@ -414,15 +589,15 @@ export function CustomerPortalView() {
                               : "bg-card border border-border text-card-foreground"
                           }`}
                         >
-                          <div className="flex items-center justify-between text-[10px] opacity-80">
+                          <div className="flex items-center justify-between text-[10px] opacity-80 gap-3">
                             <span className="font-semibold">{m.author}</span>
                             <span>{new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
                           </div>
-                          <p className="text-xs">{m.body}</p>
+                          <p className="text-xs leading-relaxed">{m.body}</p>
                         </div>
                       ))}
                       {quotation.messages.length === 0 && (
-                        <p className="text-xs text-muted-foreground text-center py-4">No messages yet. Send a note below.</p>
+                        <p className="text-xs text-muted-foreground text-center py-4">No messages yet. Send a note below to chat with your sales representative.</p>
                       )}
                     </div>
 
@@ -432,9 +607,9 @@ export function CustomerPortalView() {
                         value={chatMessage}
                         onChange={(e) => setChatMessage(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
-                        className="text-xs h-8"
+                        className="text-xs h-8 bg-background"
                       />
-                      <Button size="sm" onClick={handleSendMessage} className="h-8 text-xs">
+                      <Button size="sm" onClick={handleSendMessage} className="h-8 text-xs bg-primary text-primary-foreground">
                         <Send className="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -443,82 +618,12 @@ export function CustomerPortalView() {
               </Card>
             </>
           ) : (
-            <Card className="shadow-xs p-10 text-center text-muted-foreground text-xs">
-              Select a commercial proposal from the left to view terms and discuss revisions.
+            <Card className="shadow-xs border-border p-12 text-center text-muted-foreground text-xs">
+              Select a commercial proposal from the left to view terms and submit negotiation requests.
             </Card>
           )}
         </div>
       </div>
-
-      {/* Counter-Offer Revision Modal */}
-      <Dialog
-        open={discountModal.open}
-        onOpenChange={(open) => setDiscountModal({ ...discountModal, open })}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-semibold">
-              Request Discount Adjustment: {discountModal.productName}
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              Submit your preferred counter-offer discount percentage and justification note.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-2 space-y-3 text-xs">
-            <div className="flex justify-between items-center p-2 rounded bg-muted/40">
-              <span className="text-muted-foreground">Current Offered Discount:</span>
-              <span className="font-mono font-bold text-foreground">{discountModal.currentDiscount}%</span>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground">Requested Counter Discount (%)</label>
-              <Input
-                type="number"
-                min={0}
-                max={50}
-                value={discountModal.requestedDiscount}
-                onChange={(e) =>
-                  setDiscountModal({
-                    ...discountModal,
-                    requestedDiscount: parseFloat(e.target.value) || 0,
-                  })
-                }
-                className="text-xs font-mono font-bold"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground">Target Delivery Date (Optional)</label>
-              <Input
-                type="date"
-                value={deliveryDate}
-                onChange={(e) => setDeliveryDate(e.target.value)}
-                className="text-xs"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground">Procurement Justification</label>
-              <Input
-                placeholder="e.g. Budget ceiling requires a 16% discount on laptop fleet."
-                value={discountModal.note}
-                onChange={(e) => setDiscountModal({ ...discountModal, note: e.target.value })}
-                className="text-xs"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setDiscountModal({ ...discountModal, open: false })}
-              className="text-xs"
-            >
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleSubmitCounterOffer} className="text-xs">
-              Submit Revision
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

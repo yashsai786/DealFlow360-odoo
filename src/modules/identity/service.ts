@@ -13,7 +13,8 @@ export type Permission =
   | "dealhealth.view"
   | "reports.view"
   | "admin.configure"
-  | "portal.use";
+  | "portal.use"
+  | "portal.confirm";
 
 const MATRIX: Record<Role, Permission[]> = {
   SALES_REP: [
@@ -55,8 +56,9 @@ const MATRIX: Record<Role, Permission[]> = {
     "dealhealth.view",
     "reports.view",
     "admin.configure",
+    "portal.confirm",
   ],
-  CUSTOMER: ["portal.use"],
+  CUSTOMER: ["portal.use", "portal.confirm"],
 };
 
 export function can(role: Role, permission: Permission) {

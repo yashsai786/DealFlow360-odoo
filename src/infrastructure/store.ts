@@ -233,7 +233,7 @@ function requireSession() {
   return state.session;
 }
 
-/* -------------------------------------------------------------- identity */
+let isSyncing = false;
 
 export const identityActions = {
   async login(email: string, password?: string) {
@@ -346,6 +346,8 @@ export const identityActions = {
     }
   },
   async syncWithDatabase() {
+    if (isSyncing) return;
+    isSyncing = true;
     try {
       // Sync users from DB (merge new DB-only users into local state)
       const dbUsers = await usersApi.list();
@@ -394,6 +396,8 @@ export const identityActions = {
       }
     } catch (error) {
       console.error("[DealFlow360] syncWithDatabase failed:", error);
+    } finally {
+      isSyncing = false;
     }
   },
   logout() {
@@ -1174,6 +1178,138 @@ export const negotiationActions = {
     );
     notify();
     return { reapproval, evaluation };
+  },
+
+  /**
+   * Customer Portal confirmation action (B8).
+   * If final terms exceed approval thresholds, automatically re-enters approval flow (B4).
+   * Otherwise, moves directly to fulfillment and invoice generation.
+   */
+  async customerConfirm(quotationId: string) {
+    const user = requireSession();
+    assertCan(user.role, "portal.confirm");
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation) throw new Error("Quotation not found");
+    if (user.role === "CUSTOMER" && user.customerId && quotation.customerId !== user.customerId) {
+      throw ApprovalRequired("This quotation belongs to another customer account.");
+    }
+
+    // Evaluate governance thresholds against current terms
+    const evaluation = calculateBlendedRisk(
+      quotation,
+      tierOf(state, quotation),
+      productMap(state),
+      state.governance,
+    );
+
+    // If terms exceed approval ceilings, quotation automatically re-enters approval flow from B4
+    if (evaluation.approvalChain.length > 0) {
+      const updated: Quotation = {
+        ...quotation,
+        stage: "PENDING_APPROVAL",
+        updatedAt: now(),
+      };
+      replaceQuotation(updated);
+
+      const approval: Approval = {
+        id: uid("a"),
+        quotationId,
+        status: "PENDING",
+        riskLevel: evaluation.riskLevel,
+        submittedBy: user.id,
+        submittedAt: now(),
+        steps: evaluation.approvalChain.map((role) => ({ role, status: "PENDING" as const })),
+      };
+
+      state = {
+        ...state,
+        approvals: [approval, ...state.approvals.filter((a) => a.quotationId !== quotationId)],
+      };
+
+      record(
+        "Quotation confirmed by customer; terms exceed discount threshold -> re-entered approval queue",
+        "Quotation",
+        quotationId,
+        `Risk: ${evaluation.riskLevel} (${evaluation.reasons.join(", ")})`
+      );
+      emit("QuotationReapprovalTriggered", `${quotation.number} · ${evaluation.riskLevel}`);
+      notify();
+
+      try {
+        await quotationsApi.update(quotationId, { stage: "PENDING_APPROVAL" });
+      } catch (err) {
+        console.warn("[CustomerPortal] Could not sync re-approval stage to DB:", err);
+      }
+
+      return {
+        routedTo: "APPROVAL" as const,
+        riskLevel: evaluation.riskLevel,
+        evaluation,
+        quotation: updated,
+      };
+    }
+
+    // Otherwise, terms are within safe limits -> moves directly to fulfillment!
+    const updated: Quotation = {
+      ...quotation,
+      stage: "CONFIRMED",
+      updatedAt: now(),
+    };
+    replaceQuotation(updated);
+
+    // Create Invoice if total > 0
+    const totals = totalsOf(state, updated);
+    let invoice: Invoice | undefined;
+    if (totals.total > 0) {
+      invoice = {
+        id: uid("i"),
+        number: `INV-${5000 + state.invoices.length + 1}`,
+        customerId: quotation.customerId,
+        quotationId,
+        amount: totals.total,
+        status: "UNPAID",
+        issuedAt: now(),
+        dueDate: new Date(Date.now() + 30 * 86400000).toISOString(),
+        payments: [],
+      };
+      state = { ...state, invoices: [invoice, ...state.invoices] };
+      emit("InvoiceCreated", invoice.number);
+    }
+
+    // Create Fulfillment Order if hardware exists
+    const prods = productMap(state);
+    const hasHardware = quotation.lines.some((l) => prods[l.productId]?.category === "Hardware");
+    let fulfillmentOrder: FulfillmentOrder | undefined;
+    if (hasHardware) {
+      fulfillmentOrder = {
+        id: uid("fo"),
+        quotationId,
+        status: "AWAITING",
+        allocations: [],
+        backorders: [],
+        createdAt: now(),
+        dueAt: new Date(Date.now() + 14 * 86400000).toISOString(),
+      };
+      state = { ...state, orders: [fulfillmentOrder, ...state.orders] };
+      emit("FulfillmentScheduled", fulfillmentOrder.id);
+    }
+
+    record("Quotation confirmed by customer; moving directly to fulfillment", "Quotation", quotationId);
+    emit("QuotationConfirmed", quotation.number);
+    notify();
+
+    try {
+      await quotationsApi.confirm(quotationId);
+    } catch (err) {
+      console.warn("[CustomerPortal] Could not sync confirmation to DB:", err);
+    }
+
+    return {
+      routedTo: "FULFILLMENT" as const,
+      quotation: updated,
+      invoice,
+      fulfillmentOrder,
+    };
   },
 };
 
