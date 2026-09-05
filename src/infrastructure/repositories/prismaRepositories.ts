@@ -5,6 +5,7 @@ import type {
   IDomainEventRepository,
   IProductRepository,
   IWarehouseRepository,
+  IInventoryRepository,
   ISubscriptionPlanRepository,
   IGovernanceRepository,
   IQuotationRepository,
@@ -22,6 +23,7 @@ import type {
   ProductCategory,
   BillingCycle,
   Warehouse,
+  InventoryItem,
   SubscriptionPlan,
   Quotation,
   QuotationLine,
@@ -327,7 +329,49 @@ export class PrismaGovernanceRepository implements IGovernanceRepository {
   }
 }
 
+/* ------------------------------------------ INVENTORY REPOSITORY */
+export class PrismaInventoryRepository implements IInventoryRepository {
+  async list(): Promise<InventoryItem[]> {
+    const rows = await prisma.inventoryItem.findMany();
+    return rows.map((r) => ({
+      warehouseId: r.warehouseId,
+      productId: r.productId,
+      available: r.available,
+      reserved: r.reserved,
+      replenishmentDays: r.replenishmentDays,
+    }));
+  }
+
+  async upsert(item: InventoryItem): Promise<InventoryItem> {
+    const id = `${item.warehouseId}_${item.productId}`;
+    const row = await prisma.inventoryItem.upsert({
+      where: { id },
+      update: {
+        available: Math.max(0, item.available),
+        reserved: Math.max(0, item.reserved ?? 0),
+        replenishmentDays: Math.max(0, item.replenishmentDays ?? 7),
+      },
+      create: {
+        id,
+        warehouseId: item.warehouseId,
+        productId: item.productId,
+        available: Math.max(0, item.available),
+        reserved: Math.max(0, item.reserved ?? 0),
+        replenishmentDays: Math.max(0, item.replenishmentDays ?? 7),
+      },
+    });
+    return {
+      warehouseId: row.warehouseId,
+      productId: row.productId,
+      available: row.available,
+      reserved: row.reserved,
+      replenishmentDays: row.replenishmentDays,
+    };
+  }
+}
+
 export const warehouseRepository = new PrismaWarehouseRepository();
+export const inventoryRepository = new PrismaInventoryRepository();
 export const subscriptionPlanRepository = new PrismaSubscriptionPlanRepository();
 export const governanceRepository = new PrismaGovernanceRepository();
 

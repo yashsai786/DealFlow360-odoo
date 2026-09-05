@@ -3,6 +3,7 @@ import type {
   User,
   Product,
   Warehouse,
+  InventoryItem,
   SubscriptionPlan,
   Quotation,
   DiscountEvaluation,
@@ -60,6 +61,16 @@ export const warehousesApi = {
     apiClient<Warehouse>("/api/warehouses", {
       method: "PATCH",
       body: JSON.stringify(warehouse),
+    }),
+};
+
+/* ---------------------------------------------- INVENTORY API CLIENT */
+export const inventoryApi = {
+  list: () => apiClient<InventoryItem[]>("/api/inventory"),
+  upsert: (item: InventoryItem) =>
+    apiClient<InventoryItem>("/api/inventory", {
+      method: "POST",
+      body: JSON.stringify(item),
     }),
 };
 

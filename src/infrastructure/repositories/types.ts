@@ -4,6 +4,7 @@ import type {
   DomainEvent,
   Product,
   Warehouse,
+  InventoryItem,
   SubscriptionPlan,
   Quotation,
   Customer,
@@ -39,6 +40,11 @@ export interface IProductRepository {
 export interface IWarehouseRepository {
   list(): Promise<Warehouse[]>;
   update(warehouse: Warehouse): Promise<Warehouse>;
+}
+
+export interface IInventoryRepository {
+  list(): Promise<InventoryItem[]>;
+  upsert(item: InventoryItem): Promise<InventoryItem>;
 }
 
 export interface ISubscriptionPlanRepository {
