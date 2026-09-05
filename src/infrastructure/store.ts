@@ -58,7 +58,7 @@ import {
   InvalidStateTransition,
   SubscriptionModificationInvalid,
 } from "../lib/errors";
-import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, subscriptionsApi } from "../lib/api";
+import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, subscriptionsApi, approvalsApi } from "../lib/api";
 
 export interface AppState {
   session: User | null;
@@ -356,6 +356,12 @@ export const identityActions = {
       if (dbQuotations && dbQuotations.length > 0) {
         set({ quotations: dbQuotations });
       }
+
+      // Sync approvals — DB is authoritative
+      const dbApprovals = await approvalsApi.list();
+      if (dbApprovals && dbApprovals.length > 0) {
+        set({ approvals: dbApprovals });
+      }
     } catch (error) {
       console.error("[DealFlow360] syncWithDatabase failed:", error);
     }
@@ -572,7 +578,7 @@ export const quotationActions = {
 /* -------------------------------------------------------------- approvals */
 
 export const approvalActions = {
-  decide(
+  async decide(
     approvalId: string,
     decision: "APPROVED" | "RETURNED" | "REJECTED",
     reason?: string,
@@ -580,44 +586,25 @@ export const approvalActions = {
     const user = requireSession();
     assertCan(user.role, "approval.decide");
     const approval = state.approvals.find((a) => a.id === approvalId);
-    if (!approval) return;
+    if (!approval) throw new Error("Approval not found");
     const stepIndex = approval.steps.findIndex((s) => s.status === "PENDING");
-    if (stepIndex < 0) return;
+    if (stepIndex < 0) throw new Error("This approval workflow has already been completed.");
     const step = approval.steps[stepIndex]!;
     if (user.role !== "ADMIN" && step.role !== user.role)
       throw ApprovalRequired(`This step is waiting on ${step.role.replace("_", " ")}.`);
     if (decision !== "APPROVED" && !reason?.trim())
       throw ApprovalRequired("A reason is required when returning or rejecting a quotation.");
 
-    const steps: ApprovalStep[] = approval.steps.map((s, i) =>
-      i === stepIndex
-        ? {
-            ...s,
-            status: decision,
-            decidedBy: user.name,
-            decidedAt: now(),
-            ...(reason ? { reason } : {}),
-          }
-        : s,
-    );
-    const chainComplete = steps.every((s) => s.status === "APPROVED");
-    const status: Approval["status"] = decision === "APPROVED" ? (chainComplete ? "APPROVED" : "PENDING") : decision;
-    state = {
-      ...state,
-      approvals: state.approvals.map((a) => (a.id === approvalId ? { ...a, steps, status } : a)),
-    };
-
-    const quotation = state.quotations.find((q) => q.id === approval.quotationId);
-    if (quotation) {
-      if (decision === "APPROVED" && chainComplete) {
-        replaceQuotation(transition(quotation, "APPROVED"));
-        emit("QuotationApproved", quotation.number);
-      } else if (decision === "RETURNED") {
-        replaceQuotation(transition(quotation, "DRAFT"));
-        emit("ApprovalReturned", quotation.number);
-      } else if (decision === "REJECTED") {
-        replaceQuotation(transition(quotation, "CANCELLED"));
-        emit("ApprovalRejected", quotation.number);
+    try {
+      const res = await approvalsApi.decide(approvalId, decision, reason);
+      if (res.approval) {
+        state = {
+          ...state,
+          approvals: state.approvals.map((a) => (a.id === approvalId ? res.approval : a)),
+        };
+      }
+      if (res.quotation) {
+        replaceQuotation(res.quotation);
       }
       record(
         decision === "APPROVED"
@@ -626,12 +613,22 @@ export const approvalActions = {
             ? "Returned for revision"
             : "Rejected",
         "Approval",
-        quotation.id,
+        approval.quotationId,
         reason,
       );
+      if (decision === "APPROVED" && res.chainComplete) {
+        emit("QuotationApproved", res.quotation?.number ?? approval.quotationId);
+      } else if (decision === "RETURNED") {
+        emit("ApprovalReturned", res.quotation?.number ?? approval.quotationId);
+      } else if (decision === "REJECTED") {
+        emit("ApprovalRejected", res.quotation?.number ?? approval.quotationId);
+      }
+      notify();
+      return { chainComplete: res.chainComplete, nextRole: res.nextRole };
+    } catch (err: any) {
+      console.error("[ApprovalActions] decide error:", err);
+      throw err;
     }
-    notify();
-    return { chainComplete, nextRole: steps.find((s) => s.status === "PENDING")?.role };
   },
 };
 

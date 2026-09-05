@@ -748,9 +748,12 @@ export class PrismaApprovalRepository implements IApprovalRepository {
     return this.toApproval(row);
   }
 
-  async list(filter?: { status?: string }): Promise<Approval[]> {
+  async list(filter?: { status?: string; quotationId?: string }): Promise<Approval[]> {
+    const where: any = {};
+    if (filter?.status) where.status = filter.status;
+    if (filter?.quotationId) where.quotationId = filter.quotationId;
     const rows = await prisma.approval.findMany({
-      where: filter?.status ? { status: filter.status } : {},
+      where,
       orderBy: { submittedAt: "desc" },
     });
     return rows.map((r) => this.toApproval(r));

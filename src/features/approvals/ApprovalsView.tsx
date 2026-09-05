@@ -73,10 +73,10 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
   const pendingApprovals = state.approvals.filter((a) => a.status === "PENDING");
   const pastApprovals = state.approvals.filter((a) => a.status !== "PENDING");
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (!selectedApproval) return;
     try {
-      const res = approvalActions.decide(selectedApproval.id, "APPROVED");
+      const res = await approvalActions.decide(selectedApproval.id, "APPROVED");
       if (res?.chainComplete) {
         toast.success("Approval chain completed! Quotation is now APPROVED.");
       } else {
@@ -87,7 +87,7 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
     }
   };
 
-  const handleConfirmDecision = () => {
+  const handleConfirmDecision = async () => {
     if (!selectedApproval) return;
     if (!decisionModal.reason.trim()) {
       toast.error("Please enter a clear reason for returning or rejecting this quotation.");
@@ -95,7 +95,7 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
     }
 
     try {
-      approvalActions.decide(selectedApproval.id, decisionModal.type, decisionModal.reason);
+      await approvalActions.decide(selectedApproval.id, decisionModal.type, decisionModal.reason);
       toast.success(
         decisionModal.type === "RETURNED"
           ? "Quotation returned for revision with feedback."
@@ -229,7 +229,7 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
                         variant={selectedApproval.riskLevel === "HIGH" ? "destructive" : "secondary"}
                         className="text-xs uppercase font-mono"
                       >
-                        {selectedApproval.riskLevel} Blended Risk
+                        Risk Score: {evaluation?.riskScore ?? 0}/100 ({selectedApproval.riskLevel})
                       </Badge>
                       <Badge variant="outline" className="text-xs font-mono">
                         {selectedApproval.status}
@@ -360,6 +360,49 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
                           </Badge>
                         </div>
                       ))}
+                    </div>
+                  </div>
+
+                  {/* Full Audit Trail Entries */}
+                  <div className="space-y-2 pt-2">
+                    <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <History className="h-3.5 w-3.5 text-muted-foreground" />
+                      Decision & Governance Audit Trail
+                    </div>
+                    <div className="rounded-md border border-border bg-muted/20 divide-y divide-border/60">
+                      {state.audit
+                        .filter(
+                          (entry) =>
+                            entry.entityId === quotation.id ||
+                            entry.entityId === selectedApproval.id
+                        )
+                        .slice(0, 8)
+                        .map((entry) => (
+                          <div key={entry.id} className="p-2.5 text-xs flex items-start justify-between gap-3">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-foreground">{entry.action}</span>
+                                <span className="text-[10px] text-muted-foreground font-mono">by {entry.actor}</span>
+                              </div>
+                              {entry.reason && (
+                                <div className="text-[11px] text-muted-foreground italic">
+                                  "{entry.reason}"
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground whitespace-nowrap font-mono">
+                              {new Date(entry.at).toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                      {state.audit.filter(
+                        (entry) =>
+                          entry.entityId === quotation.id || entry.entityId === selectedApproval.id
+                      ).length === 0 && (
+                        <div className="p-3 text-center text-muted-foreground text-xs">
+                          No audit trail entries recorded yet.
+                        </div>
+                      )}
                     </div>
                   </div>
                 </CardContent>

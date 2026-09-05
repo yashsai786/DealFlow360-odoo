@@ -158,11 +158,12 @@ export const EvaluateRiskSchema = z.object({
 
 /* -------------------------------------------- APPROVAL SCHEMAS */
 export const ApprovalDecisionSchema = z.object({
-  decision: z.enum(["APPROVE", "RETURN", "REJECT"]),
+  decision: z.enum(["APPROVE", "RETURN", "REJECT", "APPROVED", "RETURNED", "REJECTED"]),
   reason: z.string().optional(),
 }).refine(
   (data) => {
-    if ((data.decision === "RETURN" || data.decision === "REJECT") && !data.reason?.trim()) {
+    const isReturnOrReject = ["RETURN", "RETURNED", "REJECT", "REJECTED"].includes(data.decision);
+    if (isReturnOrReject && !data.reason?.trim()) {
       return false;
     }
     return true;
