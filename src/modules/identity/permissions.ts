@@ -106,7 +106,6 @@ export const PAGE_ACCESS_MATRIX: Record<Role, NavTab[]> = {
     "invoices",
     "deal-health",
     "reports",
-    "governance",
     "warehouses",
     "admin",
     "profile",

@@ -505,7 +505,7 @@ export function AppShell({
                     />
                   )}
 
-                  {canAccessPage(session?.role, "governance") && (
+                  {canAccessPage(session?.role, "governance") && !canAccessPage(session?.role, "admin") && (
                     <>
                       <div className="pt-3 pb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                         Commercial Policy
