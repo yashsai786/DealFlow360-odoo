@@ -46,11 +46,15 @@ import {
   X,
   MessageSquareQuote,
   Layers,
+  RotateCw,
+  Kanban,
 } from "lucide-react";
+import { toast } from "sonner";
 
 export type NavTab =
   | "dashboard"
   | "quotations"
+  | "pipeline"
   | "quotation-builder"
   | "approvals"
   | "fulfillment"
@@ -143,10 +147,82 @@ export function AppShell({
               </div>
             </div>
           </div>
+
+          {/* Top Menu: Sales Workspace Navigation */}
+          {!isCustomer && (
+            <div className="hidden lg:flex items-center gap-1 ml-4 pl-4 border-l border-border">
+              <Button
+                variant={currentTab === "quotations" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-8 text-xs font-medium"
+                onClick={() => onSelectTab("quotations")}
+              >
+                <FileText className="h-3.5 w-3.5 mr-1.5 text-primary" />
+                Quotations
+              </Button>
+              <Button
+                variant={currentTab === "pipeline" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-8 text-xs font-medium"
+                onClick={() => onSelectTab("pipeline")}
+              >
+                <Kanban className="h-3.5 w-3.5 mr-1.5 text-primary" />
+                Pipeline
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Right Header Actions */}
         <div className="flex items-center gap-2">
+          {/* Actions: Reload Data, Go to Back-end, Close Workspace */}
+          {!isCustomer && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs items-center gap-1.5 hidden sm:flex"
+                onClick={async () => {
+                  try {
+                    await identityActions.syncWithDatabase();
+                    toast.success("Pricing, stock, and approval data reloaded from database");
+                  } catch (err: any) {
+                    toast.error("Failed to reload data");
+                  }
+                }}
+                title="Refreshes pricing, stock, and approval data from the backend"
+              >
+                <RotateCw className="h-3.5 w-3.5 text-primary" />
+                <span>Reload Data</span>
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs items-center gap-1.5 hidden md:flex"
+                onClick={() => onSelectTab("admin")}
+                title="Opens the configuration and settings screen"
+              >
+                <Settings className="h-3.5 w-3.5 text-muted-foreground" />
+                <span>Go to Back-end</span>
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs text-muted-foreground hover:text-destructive items-center gap-1.5 hidden lg:flex"
+                onClick={() => {
+                  identityActions.logout();
+                  toast.info("Sales workspace session closed");
+                }}
+                title="Ends the current working session view"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Close Workspace</span>
+              </Button>
+            </>
+          )}
+
           {/* Quick Flow Presets Menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -432,6 +508,15 @@ export function AppShell({
                     count={state.quotations.length}
                     onClick={() => {
                       onSelectTab("quotations");
+                      setMobileOpen(false);
+                    }}
+                  />
+                  <NavItem
+                    icon={<Kanban className="h-4 w-4" />}
+                    label="Pipeline"
+                    active={currentTab === "pipeline"}
+                    onClick={() => {
+                      onSelectTab("pipeline");
                       setMobileOpen(false);
                     }}
                   />

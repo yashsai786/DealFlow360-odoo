@@ -74,6 +74,18 @@ export default function App() {
 
           {currentTab === "quotations" && (
             <QuotationsListView
+              initialView="list"
+              onSelectQuote={(id) => handleNavigate("quotation-builder", id)}
+              onCreateNew={() => {
+                setSelectedQuotationId(undefined);
+                handleNavigate("quotation-builder");
+              }}
+            />
+          )}
+
+          {currentTab === "pipeline" && (
+            <QuotationsListView
+              initialView="pipeline"
               onSelectQuote={(id) => handleNavigate("quotation-builder", id)}
               onCreateNew={() => {
                 setSelectedQuotationId(undefined);

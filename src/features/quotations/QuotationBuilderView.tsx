@@ -41,6 +41,8 @@ import {
   PackagePlus,
   IndianRupee,
   TrendingUp,
+  Minus,
+  Percent,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -169,6 +171,26 @@ export function QuotationBuilderView({
       await quotationActions.updateLine(quotation.id, lineId, { qty: Math.max(1, qty) });
     } catch (err: any) {
       toast.error(err.message || "Cannot update line");
+    }
+  };
+
+  const [orderDiscount, setOrderDiscount] = useState<string>("");
+
+  const handleApplyOrderDiscount = async () => {
+    if (!quotation || quotation.lines.length === 0) return;
+    const disc = parseFloat(orderDiscount);
+    if (isNaN(disc) || disc < 0 || disc > 100) {
+      toast.error("Please enter a valid discount percentage (0-100)");
+      return;
+    }
+    try {
+      for (const line of quotation.lines) {
+        await quotationActions.updateLine(quotation.id, line.id, { discountPct: disc });
+      }
+      toast.success(`Applied ${disc}% order-level discount across all ${quotation.lines.length} lines`);
+      setOrderDiscount("");
+    } catch (err: any) {
+      toast.error("Failed to apply order-level discount");
     }
   };
 
@@ -322,23 +344,50 @@ export function QuotationBuilderView({
 
           {/* Quotation Line Items Table */}
           <Card className="shadow-xs">
-            <CardHeader className="p-4 pb-2 border-b border-border flex flex-row items-center justify-between">
+            <CardHeader className="p-4 pb-2 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <CardTitle className="text-xs font-semibold">Quotation Line Items</CardTitle>
                 <CardDescription className="text-[11px]">
                   Real-time discount governance evaluation per line
                 </CardDescription>
               </div>
-              <Badge variant="outline" className="text-xs font-mono">
-                {quotation.lines.length} items
-              </Badge>
+              <div className="flex items-center gap-2">
+                {/* Order Level Discount Control */}
+                {quotation.lines.length > 0 && ["DRAFT", "APPROVED", "NEGOTIATION"].includes(quotation.stage) && (
+                  <div className="flex items-center gap-1 bg-muted/40 border border-border rounded-md px-2 py-0.5">
+                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">Order Discount:</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      placeholder="0"
+                      value={orderDiscount}
+                      onChange={(e) => setOrderDiscount(e.target.value)}
+                      className="h-6 w-12 text-xs text-center p-0.5 font-mono"
+                    />
+                    <span className="text-[11px] text-muted-foreground">%</span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-6 text-[10px] px-2 font-medium"
+                      onClick={handleApplyOrderDiscount}
+                    >
+                      Apply to All
+                    </Button>
+                  </div>
+                )}
+                <Badge variant="outline" className="text-xs font-mono">
+                  {quotation.lines.length} items
+                </Badge>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
                   <TableRow className="text-[11px]">
                     <TableHead>Product / Category</TableHead>
-                    <TableHead className="w-16">Qty</TableHead>
+                    <TableHead className="w-24">Qty</TableHead>
                     <TableHead className="w-24">Unit Price</TableHead>
                     <TableHead className="w-28">Discount %</TableHead>
                     <TableHead className="w-28">Governance</TableHead>
@@ -365,13 +414,38 @@ export function QuotationBuilderView({
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
-                            min={1}
-                            value={l.qty}
-                            onChange={(e) => handleUpdateQty(l.id, parseInt(e.target.value) || 1)}
-                            className="h-7 w-16 text-xs text-center p-1"
-                          />
+                          <div className="flex items-center gap-0.5">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-7 w-6 text-xs p-0"
+                              onClick={() => handleUpdateQty(l.id, Math.max(1, l.qty - 1))}
+                              disabled={!["DRAFT", "APPROVED", "NEGOTIATION"].includes(quotation.stage)}
+                              title="Decrease quantity"
+                            >
+                              <Minus className="h-3 w-3" />
+                            </Button>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={l.qty}
+                              onChange={(e) => handleUpdateQty(l.id, parseInt(e.target.value) || 1)}
+                              disabled={!["DRAFT", "APPROVED", "NEGOTIATION"].includes(quotation.stage)}
+                              className="h-7 w-12 text-xs text-center p-0.5 font-mono"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-7 w-6 text-xs p-0"
+                              onClick={() => handleUpdateQty(l.id, l.qty + 1)}
+                              disabled={!["DRAFT", "APPROVED", "NEGOTIATION"].includes(quotation.stage)}
+                              title="Increase quantity"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </TableCell>
                         <TableCell className="font-mono">
                           ₹{l.unitPrice.toLocaleString()}
