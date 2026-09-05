@@ -71,10 +71,10 @@ export function FulfillmentView() {
   );
 
   // Accept suggested split
-  const handleAcceptSplit = () => {
+  const handleAcceptSplit = async () => {
     if (!order) return;
     try {
-      const res = fulfillmentActions.acceptSplit(order.id);
+      const res = await fulfillmentActions.acceptSplit(order.id);
       if (res?.backorders.length) {
         toast.warning(
           `Allocated available stock. ${res.backorders[0]?.qty} units placed on backorder due to depot shortages.`,
@@ -88,10 +88,10 @@ export function FulfillmentView() {
   };
 
   // Ship order
-  const handleShip = () => {
+  const handleShip = async () => {
     if (!order) return;
     try {
-      fulfillmentActions.ship(order.id);
+      await fulfillmentActions.ship(order.id);
       toast.success("Order marked as SHIPPED! Delivery dispatched from warehouses.");
     } catch (err: any) {
       toast.error(err.message || "Cannot ship order");
@@ -99,9 +99,9 @@ export function FulfillmentView() {
   };
 
   // Replenish stock
-  const handleReplenish = (warehouseId: string, productId: string, qty: number) => {
+  const handleReplenish = async (warehouseId: string, productId: string, qty: number) => {
     try {
-      fulfillmentActions.replenish(warehouseId, productId, qty);
+      await fulfillmentActions.replenish(warehouseId, productId, qty);
       toast.success(
         `Added ${qty} units to ${state.warehouses.find((w) => w.id === warehouseId)?.name}.`,
       );
@@ -111,10 +111,10 @@ export function FulfillmentView() {
   };
 
   // Consolidate backorder
-  const handleConsolidate = (backorderId: string) => {
+  const handleConsolidate = async (backorderId: string) => {
     if (!order) return;
     try {
-      fulfillmentActions.consolidate(order.id, backorderId);
+      await fulfillmentActions.consolidate(order.id, backorderId);
       toast.success("Consolidated backorder into shipment!");
     } catch (err: any) {
       toast.error(err.message || "Cannot consolidate backorder");
@@ -144,10 +144,10 @@ export function FulfillmentView() {
     setOverrideModal({ open: true, allocations: initial });
   };
 
-  const handleSaveOverride = () => {
+  const handleSaveOverride = async () => {
     if (!order) return;
     try {
-      fulfillmentActions.overrideSplit(order.id, overrideModal.allocations);
+      await fulfillmentActions.overrideSplit(order.id, overrideModal.allocations);
       toast.success("Manual warehouse allocation applied!");
       setOverrideModal({ open: false, allocations: [] });
     } catch (err: any) {

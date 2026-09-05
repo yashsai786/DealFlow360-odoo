@@ -863,6 +863,45 @@ export class PrismaFulfillmentRepository implements IFulfillmentRepository {
       createdAt: row.createdAt.toISOString(),
     }));
   }
+
+  async findById(id: string): Promise<FulfillmentOrder | null> {
+    const row = await prisma.fulfillmentOrder.findUnique({ where: { id } });
+    if (!row) return null;
+    return {
+      id: row.id,
+      quotationId: row.quotationId,
+      status: row.status as any,
+      allocations: JSON.parse(row.allocations || "[]"),
+      backorders: JSON.parse(row.backorders || "[]"),
+      shippedAt: row.shippedAt ?? undefined,
+      dueAt: row.dueAt,
+      createdAt: row.createdAt.toISOString(),
+    };
+  }
+
+  async update(id: string, patch: Partial<FulfillmentOrder>): Promise<FulfillmentOrder> {
+    const data: any = {};
+    if (patch.status !== undefined) data.status = patch.status;
+    if (patch.allocations !== undefined) data.allocations = JSON.stringify(patch.allocations);
+    if (patch.backorders !== undefined) data.backorders = JSON.stringify(patch.backorders);
+    if (patch.shippedAt !== undefined) data.shippedAt = patch.shippedAt;
+    if (patch.dueAt !== undefined) data.dueAt = patch.dueAt;
+
+    const row = await prisma.fulfillmentOrder.update({
+      where: { id },
+      data,
+    });
+    return {
+      id: row.id,
+      quotationId: row.quotationId,
+      status: row.status as any,
+      allocations: JSON.parse(row.allocations || "[]"),
+      backorders: JSON.parse(row.backorders || "[]"),
+      shippedAt: row.shippedAt ?? undefined,
+      dueAt: row.dueAt,
+      createdAt: row.createdAt.toISOString(),
+    };
+  }
 }
 
 export const quotationRepository = new PrismaQuotationRepository();
