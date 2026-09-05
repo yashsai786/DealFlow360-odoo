@@ -60,7 +60,7 @@ import {
   InvalidStateTransition,
   SubscriptionModificationInvalid,
 } from "../lib/errors";
-import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, subscriptionsApi, approvalsApi, recommendationsApi, fulfillmentApi, auditApi } from "../lib/api";
+import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, subscriptionsApi, approvalsApi, recommendationsApi, fulfillmentApi, auditApi, dealHealthApi } from "../lib/api";
 
 export interface AppState {
   session: User | null;
@@ -651,22 +651,51 @@ export const quotationActions = {
     notify();
   },
 
-  nudge(quotationId: string) {
+  async nudge(quotationId: string, note?: string) {
     const quotation = state.quotations.find((q) => q.id === quotationId);
     if (!quotation) return;
-    replaceQuotation({ ...quotation, nudgedAt: now() });
-    record("Nudged deal owner", "Quotation", quotationId);
+    const timestamp = now();
+    replaceQuotation({ ...quotation, nudgedAt: timestamp });
+    record("Nudged deal owner", "Quotation", quotationId, note);
     emit("DealHealthAlertCreated", `${quotation.number} · owner nudged`);
     notify();
+
+    try {
+      const res = await dealHealthApi.nudge(quotationId, note);
+      if (res?.quotation) {
+        replaceQuotation(res.quotation);
+      }
+      if (res?.audit) {
+        state.audit = [res.audit, ...state.audit];
+      }
+      notify();
+      return res;
+    } catch (err) {
+      console.warn("API nudge sync failed, local state retained", err);
+    }
   },
 
-  escalate(quotationId: string) {
+  async escalate(quotationId: string, reason?: string) {
     const quotation = state.quotations.find((q) => q.id === quotationId);
     if (!quotation) return;
     replaceQuotation({ ...quotation, escalated: true });
-    record("Escalated to management", "Quotation", quotationId);
+    record("Escalated to management", "Quotation", quotationId, reason);
     emit("DealHealthAlertCreated", `${quotation.number} · escalated`);
     notify();
+
+    try {
+      const res = await dealHealthApi.escalate(quotationId, reason);
+      if (res?.quotation) {
+        replaceQuotation(res.quotation);
+      }
+      if (res?.audit) {
+        state.audit = [res.audit, ...state.audit];
+      }
+      notify();
+      return res;
+    } catch (err) {
+      console.warn("API escalate sync failed, local state retained", err);
+    }
   },
 };
 

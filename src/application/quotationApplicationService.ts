@@ -19,6 +19,7 @@ import type {
   FulfillmentOrder,
   DiscountEvaluation,
   Product,
+  AuditEntry,
 } from "../modules/shared/types";
 import { assertCan } from "../modules/identity/service";
 import { canTransition, calculateTotals, round } from "../modules/quotations/service";
@@ -489,6 +490,76 @@ export class QuotationApplicationService {
     }
 
     return { deletedCount, deletedIds: validIds };
+  }
+
+  async nudge(
+    id: string,
+    note?: string,
+    actor?: User
+  ): Promise<{ quotation: Quotation; audit: AuditEntry }> {
+    const quotation = await quotationRepository.findById(id);
+    if (!quotation) {
+      throw new Error(`Quotation '${id}' not found`);
+    }
+
+    const timestamp = now();
+    const updated = await quotationRepository.update(id, { nudgedAt: timestamp });
+    const actorName = actor?.name || "Deal Intelligence";
+
+    const audit: AuditEntry = {
+      id: uid("aud"),
+      entity: "Quotation",
+      entityId: quotation.id,
+      actor: actorName,
+      action: "Nudged deal owner",
+      reason: note?.trim() || "Automated deal health inactivity nudge",
+      at: timestamp,
+    };
+    const savedAudit = await auditRepository.record(audit);
+
+    await domainEventRepository.emit({
+      id: uid("evt"),
+      name: "DealHealthAlertCreated",
+      payload: `${quotation.number} · owner nudged`,
+      at: timestamp,
+    });
+
+    return { quotation: updated, audit: savedAudit };
+  }
+
+  async escalate(
+    id: string,
+    reason?: string,
+    actor?: User
+  ): Promise<{ quotation: Quotation; audit: AuditEntry }> {
+    const quotation = await quotationRepository.findById(id);
+    if (!quotation) {
+      throw new Error(`Quotation '${id}' not found`);
+    }
+
+    const timestamp = now();
+    const updated = await quotationRepository.update(id, { escalated: true });
+    const actorName = actor?.name || "Deal Intelligence";
+
+    const audit: AuditEntry = {
+      id: uid("aud"),
+      entity: "Quotation",
+      entityId: quotation.id,
+      actor: actorName,
+      action: "Escalated to management",
+      reason: reason?.trim() || "Automated deal health anomaly escalation",
+      at: timestamp,
+    };
+    const savedAudit = await auditRepository.record(audit);
+
+    await domainEventRepository.emit({
+      id: uid("evt"),
+      name: "DealHealthAlertCreated",
+      payload: `${quotation.number} · escalated`,
+      at: timestamp,
+    });
+
+    return { quotation: updated, audit: savedAudit };
   }
 }
 

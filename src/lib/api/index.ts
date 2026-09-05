@@ -13,6 +13,7 @@ import type {
   FulfillmentOrder,
   Recommendation,
   AuditEntry,
+  DealHealthAlert,
 } from "../../modules/shared/types";
 import type { GovernanceConfig } from "../../modules/discount-governance/service";
 import type { UpsellConfig } from "../../modules/recommendations/service";
@@ -332,5 +333,36 @@ export const auditApi = {
     return apiClient<AuditEntry[]>(`/api/audit${qs ? `?${qs}` : ""}`);
   },
 };
+
+/* ----------------------------------------- DEAL HEALTH API CLIENT */
+export const dealHealthApi = {
+  get: (stallDays?: number) => {
+    const qs = stallDays ? `?stallDays=${stallDays}` : "";
+    return apiClient<{
+      stallDaysThreshold: number;
+      summary: {
+        criticalCount: number;
+        atRiskCount: number;
+        watchCount: number;
+        healthyCount: number;
+        totalQuotations: number;
+        totalAlerts: number;
+      };
+      alerts: DealHealthAlert[];
+      repBaselines: Record<string, number>;
+    }>(`/api/deal-health${qs}`);
+  },
+  nudge: (quotationId: string, note?: string) =>
+    apiClient<{ quotation: Quotation; audit: AuditEntry }>(`/api/quotations/${quotationId}/nudge`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+  escalate: (quotationId: string, reason?: string) =>
+    apiClient<{ quotation: Quotation; audit: AuditEntry }>(`/api/quotations/${quotationId}/escalate`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason || "Escalated to management" }),
+    }),
+};
+
 
 
