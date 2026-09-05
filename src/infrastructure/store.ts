@@ -1,0 +1,1081 @@
+import { useSyncExternalStore } from "react";
+import type {
+  Approval,
+  ApprovalStep,
+  AuditEntry,
+  Customer,
+  CustomerTier,
+  DomainEvent,
+  FulfillmentOrder,
+  InventoryItem,
+  Invoice,
+  NegotiationRequest,
+  Product,
+  ProductCategory,
+  Quotation,
+  QuotationLine,
+  QuotationStage,
+  Role,
+  Subscription,
+  SubscriptionPlan,
+  User,
+  Warehouse,
+} from "../modules/shared/types";
+import {
+  APPROVALS,
+  AUDIT,
+  CUSTOMERS,
+  EVENTS,
+  INVENTORY,
+  INVOICES,
+  ORDERS,
+  PLANS,
+  PRODUCTS,
+  QUOTATIONS,
+  SUBSCRIPTIONS,
+  USERS,
+  WAREHOUSES,
+} from "./seed";
+import {
+  CATEGORY_CEILINGS,
+  TIER_CEILINGS,
+  calculateBlendedRisk,
+  type GovernanceConfig,
+} from "../modules/discount-governance/service";
+import { calculateTotals, canTransition, round } from "../modules/quotations/service";
+import {
+  calculateWarehouseSplit,
+  canConsolidate,
+  createBackorders,
+  type SplitPlan,
+} from "../modules/fulfillment/service";
+import { addCycle, calculateProration, reconcile } from "../modules/billing/service";
+import { assertCan } from "../modules/identity/service";
+import {
+  ApprovalRequired,
+  InsufficientStock,
+  InvalidPayment,
+  InvalidStateTransition,
+  SubscriptionModificationInvalid,
+} from "../lib/errors";
+
+export interface AppState {
+  session: User | null;
+  users: User[];
+  customers: Customer[];
+  products: Product[];
+  warehouses: Warehouse[];
+  inventory: InventoryItem[];
+  plans: SubscriptionPlan[];
+  quotations: Quotation[];
+  approvals: Approval[];
+  orders: FulfillmentOrder[];
+  subscriptions: Subscription[];
+  invoices: Invoice[];
+  audit: AuditEntry[];
+  events: DomainEvent[];
+  governance: GovernanceConfig;
+}
+
+const STORAGE_KEY = "dealflow360_app_state_v1";
+
+function loadState(): AppState {
+  const defaults: AppState = {
+    session: USERS[0] ?? null,
+    users: USERS,
+    customers: CUSTOMERS,
+    products: PRODUCTS,
+    warehouses: WAREHOUSES,
+    inventory: INVENTORY,
+    plans: PLANS,
+    quotations: QUOTATIONS,
+    approvals: APPROVALS,
+    orders: ORDERS,
+    subscriptions: SUBSCRIPTIONS,
+    invoices: INVOICES,
+    audit: AUDIT,
+    events: EVENTS,
+    governance: { tierCeilings: { ...TIER_CEILINGS }, categoryCeilings: { ...CATEGORY_CEILINGS } },
+  };
+
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return {
+          ...defaults,
+          ...parsed,
+          users: Array.isArray(parsed.users) && parsed.users.length ? parsed.users : defaults.users,
+          session: parsed.session !== undefined ? parsed.session : defaults.session,
+        };
+      }
+    } catch (e) {
+      console.warn("[DealFlow360] Could not read local state:", e);
+    }
+  }
+  return defaults;
+}
+
+function saveState(s: AppState) {
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    } catch (e) {
+      console.warn("[DealFlow360] Could not persist local state:", e);
+    }
+  }
+}
+
+let state: AppState = loadState();
+
+const listeners = new Set<() => void>();
+const notify = () => {
+  saveState(state);
+  listeners.forEach((l) => l());
+};
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function set(patch: Partial<AppState>) {
+  state = { ...state, ...patch };
+  notify();
+}
+
+export function useAppState() {
+  return useSyncExternalStore(
+    subscribe,
+    () => state,
+    () => state,
+  );
+}
+
+/* ------------------------------------------------------------------ helpers */
+
+export function productMap(s: AppState = state): Record<string, Product> {
+  return Object.fromEntries(s.products.map((p) => [p.id, p]));
+}
+export function customerMap(s: AppState = state): Record<string, Customer> {
+  return Object.fromEntries(s.customers.map((c) => [c.id, c]));
+}
+export function userMap(s: AppState = state): Record<string, User> {
+  return Object.fromEntries(s.users.map((u) => [u.id, u]));
+}
+
+export function tierOf(s: AppState, quotation: Quotation): CustomerTier {
+  return s.customers.find((c) => c.id === quotation.customerId)?.tier ?? "Bronze";
+}
+
+export function evaluate(s: AppState, quotation: Quotation) {
+  return calculateBlendedRisk(quotation, tierOf(s, quotation), productMap(s), s.governance);
+}
+
+export function totalsOf(s: AppState, quotation: Quotation) {
+  return calculateTotals(quotation.lines, productMap(s));
+}
+
+export function splitFor(s: AppState, order: FulfillmentOrder): SplitPlan {
+  const quotation = s.quotations.find((q) => q.id === order.quotationId);
+  if (!quotation)
+    return { allocations: [], shortages: [], shipmentCount: 0, shippingCost: 0 };
+  return calculateWarehouseSplit(quotation, productMap(s), s.warehouses, s.inventory);
+}
+
+const now = () => new Date().toISOString();
+const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
+
+function record(action: string, entity: string, entityId: string, reason?: string) {
+  const actor = state.session?.name ?? "System";
+  const entry: AuditEntry = {
+    id: uid("au"),
+    entity,
+    entityId,
+    actor,
+    action,
+    at: now(),
+    ...(reason ? { reason } : {}),
+  };
+  state = { ...state, audit: [entry, ...state.audit] };
+}
+
+function emit(name: string, payload: string) {
+  state = {
+    ...state,
+    events: [{ id: uid("e"), name, payload, at: now() }, ...state.events].slice(0, 120),
+  };
+}
+
+function replaceQuotation(quotation: Quotation) {
+  state = {
+    ...state,
+    quotations: state.quotations.map((q) => (q.id === quotation.id ? quotation : q)),
+  };
+}
+
+function touch(quotation: Quotation): Quotation {
+  return { ...quotation, updatedAt: now() };
+}
+
+function transition(quotation: Quotation, to: QuotationStage): Quotation {
+  if (quotation.stage !== to && !canTransition(quotation.stage, to))
+    throw InvalidStateTransition(quotation.stage, to);
+  return { ...quotation, stage: to, updatedAt: now() };
+}
+
+function requireSession() {
+  if (!state.session) throw ApprovalRequired("Please sign in again to continue.");
+  return state.session;
+}
+
+/* -------------------------------------------------------------- identity */
+
+export const identityActions = {
+  login(email: string) {
+    const user = state.users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
+    if (!user) return null;
+    set({ session: user });
+    record("Signed in", "Session", user.id);
+    emit("UserSignedIn", `${user.name} (${user.role})`);
+    return user;
+  },
+  async signup(name: string, email: string, role: Role, customerId?: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const existing = state.users.find((u) => u.email.toLowerCase() === normalizedEmail);
+    if (existing) {
+      throw new Error("A user with this email address already exists.");
+    }
+    const newUser: User = {
+      id: uid("u"),
+      name: name.trim(),
+      email: normalizedEmail,
+      role,
+      ...(role === "CUSTOMER" && customerId ? { customerId } : {}),
+    };
+
+    // 1. Immediately update reactive state & localStorage
+    set({
+      users: [...state.users, newUser],
+      session: newUser,
+    });
+    record("Registered account", "User", newUser.id);
+    emit("UserRegistered", `${newUser.name} as ${newUser.role}`);
+    return newUser;
+  },
+  async updateProfile(userId: string, updates: { name?: string; email?: string }) {
+    const user = state.users.find((u) => u.id === userId);
+    if (!user) return null;
+    const updatedUser: User = {
+      ...user,
+      ...(updates.name ? { name: updates.name.trim() } : {}),
+      ...(updates.email ? { email: updates.email.trim().toLowerCase() } : {}),
+    };
+    const updatedUsers = state.users.map((u) => (u.id === userId ? updatedUser : u));
+    set({
+      users: updatedUsers,
+      session: state.session?.id === userId ? updatedUser : state.session,
+    });
+    record("Updated profile details", "User", userId);
+    emit("UserProfileUpdated", updatedUser.name);
+    return updatedUser;
+  },
+  async syncWithDatabase() {
+    // Pure frontend in-memory mode - no backend needed
+  },
+  logout() {
+    if (state.session) {
+      record("Signed out", "Session", state.session.id);
+      emit("UserSignedOut", state.session.name);
+    }
+    set({ session: null });
+  },
+  switchUser(userId: string) {
+    const user = state.users.find((u) => u.id === userId);
+    if (user) {
+      set({ session: user });
+      record(`Switched persona to ${user.name}`, "Session", user.id);
+      emit("UserSwitched", `${user.name} (${user.role})`);
+    }
+    return user ?? null;
+  },
+};
+
+/* ------------------------------------------------------------ quotations */
+
+export const quotationActions = {
+  create(customerId: string) {
+    const user = requireSession();
+    assertCan(user.role, "quotation.create");
+    const seq = 1048 + state.quotations.filter((q) => q.number.startsWith("Q-10")).length;
+    const quotation: Quotation = {
+      id: uid("q"),
+      number: `Q-${seq}`,
+      customerId,
+      ownerId: user.role === "CUSTOMER" ? "u-rep1" : user.id,
+      stage: "DRAFT",
+      lines: [],
+      createdAt: now(),
+      updatedAt: now(),
+      messages: [],
+      requests: [],
+      dismissedRecommendations: [],
+    };
+    state = { ...state, quotations: [quotation, ...state.quotations] };
+    record("Created quotation", "Quotation", quotation.id);
+    emit("QuotationCreated", quotation.number);
+    notify();
+    return quotation;
+  },
+
+  addLine(quotationId: string, productId: string, qty = 1) {
+    const user = requireSession();
+    assertCan(user.role, "quotation.edit");
+    const product = state.products.find((p) => p.id === productId);
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!product || !quotation) return;
+    const existing = quotation.lines.find((l) => l.productId === productId);
+    const lines: QuotationLine[] = existing
+      ? quotation.lines.map((l) => (l.id === existing.id ? { ...l, qty: l.qty + qty } : l))
+      : [
+          ...quotation.lines,
+          {
+            id: uid("l"),
+            productId,
+            qty,
+            unitPrice: product.price,
+            discountPct: 0,
+            taxPct: product.taxPct,
+          },
+        ];
+    replaceQuotation(touch({ ...quotation, lines }));
+    record(`Added ${product.name} × ${qty}`, "Quotation", quotationId);
+    notify();
+  },
+
+  updateLine(quotationId: string, lineId: string, patch: Partial<QuotationLine>) {
+    const user = requireSession();
+    assertCan(user.role, "quotation.edit");
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation) return;
+    const lines = quotation.lines.map((l) => (l.id === lineId ? { ...l, ...patch } : l));
+    replaceQuotation(touch({ ...quotation, lines }));
+    if (patch.discountPct !== undefined) {
+      record(`Discount changed to ${patch.discountPct}%`, "Quotation", quotationId);
+    }
+    notify();
+  },
+
+  removeLine(quotationId: string, lineId: string) {
+    const user = requireSession();
+    assertCan(user.role, "quotation.edit");
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation) return;
+    replaceQuotation(touch({ ...quotation, lines: quotation.lines.filter((l) => l.id !== lineId) }));
+    record("Removed a line", "Quotation", quotationId);
+    notify();
+  },
+
+  moveLine(quotationId: string, lineId: string, direction: -1 | 1) {
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation) return;
+    const index = quotation.lines.findIndex((l) => l.id === lineId);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= quotation.lines.length) return;
+    const lines = [...quotation.lines];
+    const moved = lines[index]!;
+    lines[index] = lines[target]!;
+    lines[target] = moved;
+    replaceQuotation({ ...quotation, lines });
+    notify();
+  },
+
+  /** Submits and builds the approval chain from the live risk evaluation. */
+  submitForApproval(quotationId: string) {
+    const user = requireSession();
+    assertCan(user.role, "quotation.submit");
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation) return null;
+    if (quotation.lines.length === 0)
+      throw ApprovalRequired("Add at least one product line before submitting.");
+
+    const evaluation = evaluate(state, quotation);
+    emit("DiscountRiskDetected", `${quotation.number} · ${evaluation.riskLevel}`);
+
+    if (evaluation.approvalChain.length === 0) {
+      replaceQuotation(transition(quotation, "APPROVED"));
+      record("Auto-approved — inside discount policy", "Quotation", quotationId);
+      emit("QuotationApproved", quotation.number);
+      notify();
+      return { autoApproved: true, evaluation };
+    }
+
+    const approval: Approval = {
+      id: uid("a"),
+      quotationId,
+      status: "PENDING",
+      riskLevel: evaluation.riskLevel,
+      submittedBy: user.id,
+      submittedAt: now(),
+      steps: evaluation.approvalChain.map((role) => ({ role, status: "PENDING" as const })),
+    };
+    state = {
+      ...state,
+      approvals: [approval, ...state.approvals.filter((a) => a.quotationId !== quotationId)],
+    };
+    replaceQuotation(transition(quotation, "PENDING_APPROVAL"));
+    record("Submitted for approval", "Quotation", quotationId);
+    emit("QuotationSubmittedForApproval", quotation.number);
+    notify();
+    return { autoApproved: false, evaluation };
+  },
+
+  confirm(quotationId: string) {
+    const user = requireSession();
+    assertCan(user.role, "quotation.confirm");
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation) return;
+    const products = productMap(state);
+    const totals = totalsOf(state, quotation);
+
+    replaceQuotation(transition(quotation, "CONFIRMED"));
+    record("Quotation confirmed", "Quotation", quotationId);
+    emit("QuotationConfirmed", quotation.number);
+
+    // One-time value becomes an invoice, hardware becomes a fulfillment order.
+    if (totals.oneTimeTotal > 0) {
+      const invoice: Invoice = {
+        id: uid("i"),
+        number: `INV-${5003 + state.invoices.length}`,
+        customerId: quotation.customerId,
+        quotationId,
+        amount: round(totals.oneTimeTotal * 1.08),
+        status: "UNPAID",
+        issuedAt: now(),
+        dueDate: new Date(Date.now() + 30 * 86400000).toISOString(),
+        payments: [],
+      };
+      state = { ...state, invoices: [invoice, ...state.invoices] };
+      emit("InvoiceCreated", invoice.number);
+    }
+
+    if (quotation.lines.some((l) => products[l.productId]?.category === "Hardware")) {
+      const order: FulfillmentOrder = {
+        id: uid("f"),
+        quotationId,
+        status: "AWAITING",
+        allocations: [],
+        backorders: [],
+        createdAt: now(),
+        dueAt: new Date(Date.now() + 14 * 86400000).toISOString(),
+      };
+      state = { ...state, orders: [order, ...state.orders] };
+      const moved = state.quotations.find((q) => q.id === quotationId)!;
+      replaceQuotation(transition(moved, "FULFILLMENT"));
+    }
+
+    // Recurring lines create a subscription with a real billing schedule.
+    for (const line of quotation.lines) {
+      const product = products[line.productId];
+      if (!product?.cycle) continue;
+      const plan = state.plans.find((p) => p.cycle === product.cycle) ?? state.plans[0]!;
+      const subscription: Subscription = {
+        id: uid("s"),
+        customerId: quotation.customerId,
+        quotationId,
+        planId: plan.id,
+        qty: line.qty,
+        unitPrice: round(line.unitPrice * (1 - line.discountPct / 100)),
+        cycle: product.cycle,
+        startDate: now(),
+        nextBillDate: addCycle(now(), product.cycle),
+        status: "ACTIVE",
+        adjustments: [],
+      };
+      state = { ...state, subscriptions: [subscription, ...state.subscriptions] };
+      emit("SubscriptionCreated", `${quotation.number} · ${plan.name}`);
+    }
+    notify();
+  },
+
+  addRecommendation(quotationId: string, productId: string) {
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    const product = state.products.find((p) => p.id === productId);
+    if (!quotation || !product) return;
+    const qty = quotation.lines[0]?.qty ?? 1;
+    quotationActions.addLine(quotationId, productId, qty);
+    emit("RecommendationAdded", `${quotation.number} · ${product.name}`);
+    notify();
+  },
+
+  dismissRecommendation(quotationId: string, productId: string) {
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation) return;
+    replaceQuotation({
+      ...quotation,
+      dismissedRecommendations: [...quotation.dismissedRecommendations, productId],
+    });
+    notify();
+  },
+
+  nudge(quotationId: string) {
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation) return;
+    replaceQuotation({ ...quotation, nudgedAt: now() });
+    record("Nudged deal owner", "Quotation", quotationId);
+    emit("DealHealthAlertCreated", `${quotation.number} · owner nudged`);
+    notify();
+  },
+
+  escalate(quotationId: string) {
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation) return;
+    replaceQuotation({ ...quotation, escalated: true });
+    record("Escalated to management", "Quotation", quotationId);
+    emit("DealHealthAlertCreated", `${quotation.number} · escalated`);
+    notify();
+  },
+};
+
+/* -------------------------------------------------------------- approvals */
+
+export const approvalActions = {
+  decide(
+    approvalId: string,
+    decision: "APPROVED" | "RETURNED" | "REJECTED",
+    reason?: string,
+  ) {
+    const user = requireSession();
+    assertCan(user.role, "approval.decide");
+    const approval = state.approvals.find((a) => a.id === approvalId);
+    if (!approval) return;
+    const stepIndex = approval.steps.findIndex((s) => s.status === "PENDING");
+    if (stepIndex < 0) return;
+    const step = approval.steps[stepIndex]!;
+    if (user.role !== "ADMIN" && step.role !== user.role)
+      throw ApprovalRequired(`This step is waiting on ${step.role.replace("_", " ")}.`);
+    if (decision !== "APPROVED" && !reason?.trim())
+      throw ApprovalRequired("A reason is required when returning or rejecting a quotation.");
+
+    const steps: ApprovalStep[] = approval.steps.map((s, i) =>
+      i === stepIndex
+        ? {
+            ...s,
+            status: decision,
+            decidedBy: user.name,
+            decidedAt: now(),
+            ...(reason ? { reason } : {}),
+          }
+        : s,
+    );
+    const chainComplete = steps.every((s) => s.status === "APPROVED");
+    const status: Approval["status"] = decision === "APPROVED" ? (chainComplete ? "APPROVED" : "PENDING") : decision;
+    state = {
+      ...state,
+      approvals: state.approvals.map((a) => (a.id === approvalId ? { ...a, steps, status } : a)),
+    };
+
+    const quotation = state.quotations.find((q) => q.id === approval.quotationId);
+    if (quotation) {
+      if (decision === "APPROVED" && chainComplete) {
+        replaceQuotation(transition(quotation, "APPROVED"));
+        emit("QuotationApproved", quotation.number);
+      } else if (decision === "RETURNED") {
+        replaceQuotation(transition(quotation, "DRAFT"));
+        emit("ApprovalReturned", quotation.number);
+      } else if (decision === "REJECTED") {
+        replaceQuotation(transition(quotation, "CANCELLED"));
+        emit("ApprovalRejected", quotation.number);
+      }
+      record(
+        decision === "APPROVED"
+          ? `${step.role.replace("_", " ")} approved`
+          : decision === "RETURNED"
+            ? "Returned for revision"
+            : "Rejected",
+        "Approval",
+        quotation.id,
+        reason,
+      );
+    }
+    notify();
+    return { chainComplete, nextRole: steps.find((s) => s.status === "PENDING")?.role };
+  },
+};
+
+/* ------------------------------------------------------------ fulfillment */
+
+export const fulfillmentActions = {
+  acceptSplit(orderId: string) {
+    const user = requireSession();
+    assertCan(user.role, "fulfillment.manage");
+    const order = state.orders.find((o) => o.id === orderId);
+    if (!order) return;
+    const plan = splitFor(state, order);
+    if (plan.allocations.length === 0)
+      throw InsufficientStock("No stock is currently available to allocate for this order.");
+
+    const inventory = state.inventory.map((item) => {
+      const allocated = plan.allocations
+        .filter((a) => a.warehouseId === item.warehouseId && a.productId === item.productId)
+        .reduce((sum, a) => sum + a.qty, 0);
+      return allocated ? { ...item, reserved: item.reserved + allocated } : item;
+    });
+    const backorders = createBackorders(plan.shortages);
+
+    state = {
+      ...state,
+      inventory,
+      orders: state.orders.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              allocations: plan.allocations,
+              backorders,
+              status: backorders.length ? "BACKORDERED" : "ALLOCATED",
+            }
+          : o,
+      ),
+    };
+    record("Accepted suggested warehouse split", "Fulfillment", orderId);
+    emit("FulfillmentSplitCreated", `${orderId} · ${plan.shipmentCount} shipments`);
+    if (backorders.length) emit("BackorderCreated", `${orderId} · ${backorders[0]!.qty} units`);
+    notify();
+    return { backorders, plan };
+  },
+
+  overrideSplit(orderId: string, allocations: { warehouseId: string; productId: string; qty: number }[]) {
+    const user = requireSession();
+    assertCan(user.role, "fulfillment.manage");
+    const order = state.orders.find((o) => o.id === orderId);
+    if (!order) return;
+    for (const a of allocations) {
+      const item = state.inventory.find(
+        (i) => i.warehouseId === a.warehouseId && i.productId === a.productId,
+      );
+      const free = (item?.available ?? 0) - (item?.reserved ?? 0);
+      if (a.qty > free)
+        throw InsufficientStock(
+          `${state.warehouses.find((w) => w.id === a.warehouseId)?.name} only has ${free} units free.`,
+        );
+    }
+    const enriched = allocations
+      .filter((a) => a.qty > 0)
+      .map((a) => ({
+        ...a,
+        shipmentCost: state.warehouses.find((w) => w.id === a.warehouseId)?.shipmentCost ?? 0,
+      }));
+    const quotation = state.quotations.find((q) => q.id === order.quotationId);
+    const products = productMap(state);
+    const shortages = (quotation?.lines ?? [])
+      .filter((l) => products[l.productId]?.category === "Hardware")
+      .map((l) => ({
+        productId: l.productId,
+        qty:
+          l.qty -
+          enriched.filter((a) => a.productId === l.productId).reduce((s, a) => s + a.qty, 0),
+      }))
+      .filter((s) => s.qty > 0);
+
+    state = {
+      ...state,
+      inventory: state.inventory.map((item) => {
+        const allocated = enriched
+          .filter((a) => a.warehouseId === item.warehouseId && a.productId === item.productId)
+          .reduce((sum, a) => sum + a.qty, 0);
+        return allocated ? { ...item, reserved: item.reserved + allocated } : item;
+      }),
+      orders: state.orders.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              allocations: enriched,
+              backorders: createBackorders(shortages),
+              status: shortages.length ? "BACKORDERED" : "ALLOCATED",
+            }
+          : o,
+      ),
+    };
+    record("Manually overrode warehouse allocation", "Fulfillment", orderId);
+    emit("FulfillmentSplitCreated", `${orderId} · manual override`);
+    notify();
+  },
+
+  replenish(warehouseId: string, productId: string, qty: number) {
+    const user = requireSession();
+    assertCan(user.role, "fulfillment.manage");
+    state = {
+      ...state,
+      inventory: state.inventory.map((i) =>
+        i.warehouseId === warehouseId && i.productId === productId
+          ? { ...i, available: i.available + qty }
+          : i,
+      ),
+    };
+    record(`Replenished ${qty} units`, "Inventory", `${warehouseId}/${productId}`);
+    emit("StockReplenished", `${warehouseId} · ${qty} units`);
+    notify();
+  },
+
+  consolidate(orderId: string, backorderId: string) {
+    const user = requireSession();
+    assertCan(user.role, "fulfillment.manage");
+    const order = state.orders.find((o) => o.id === orderId);
+    const backorder = order?.backorders.find((b) => b.id === backorderId);
+    if (!order || !backorder) return;
+    if (!canConsolidate(backorder, state.inventory))
+      throw InsufficientStock("Stock is still insufficient to consolidate this backorder.");
+
+    let remaining = backorder.qty;
+    const inventory = state.inventory.map((item) => {
+      if (item.productId !== backorder.productId || remaining <= 0) return item;
+      const free = item.available - item.reserved;
+      const take = Math.min(free, remaining);
+      remaining -= take;
+      return { ...item, reserved: item.reserved + take };
+    });
+    const allocations = [...order.allocations];
+    const warehouse = state.warehouses[0]!;
+    allocations.push({
+      warehouseId: warehouse.id,
+      productId: backorder.productId,
+      qty: backorder.qty,
+      shipmentCost: warehouse.shipmentCost,
+    });
+
+    state = {
+      ...state,
+      inventory,
+      orders: state.orders.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              inventoryVersion: undefined,
+              allocations,
+              backorders: o.backorders.map((b) =>
+                b.id === backorderId ? { ...b, status: "CONSOLIDATED" as const } : b,
+              ),
+              status: "ALLOCATED",
+            }
+          : o,
+      ) as FulfillmentOrder[],
+    };
+    record("Consolidated backorder into shipment", "Fulfillment", orderId);
+    emit("BackorderConsolidated", `${orderId}`);
+    notify();
+  },
+
+  ship(orderId: string) {
+    const user = requireSession();
+    assertCan(user.role, "fulfillment.manage");
+    const order = state.orders.find((o) => o.id === orderId);
+    if (!order) return;
+    if (order.allocations.length === 0)
+      throw InsufficientStock("Allocate stock before marking this order as shipped.");
+    state = {
+      ...state,
+      orders: state.orders.map((o) =>
+        o.id === orderId ? { ...o, status: "SHIPPED", shippedAt: now() } : o,
+      ),
+    };
+    const quotation = state.quotations.find((q) => q.id === order.quotationId);
+    if (quotation && quotation.stage === "FULFILLMENT") {
+      replaceQuotation(transition(quotation, "INVOICED"));
+    }
+    record("Marked order as shipped", "Fulfillment", orderId);
+    emit("OrderShipped", orderId);
+    notify();
+  },
+};
+
+/* ---------------------------------------------------------------- billing */
+
+export const billingActions = {
+  recordPayment(invoiceId: string, amount: number, method: string) {
+    const user = requireSession();
+    assertCan(user.role, "invoice.payment");
+    const invoice = state.invoices.find((i) => i.id === invoiceId);
+    if (!invoice) return;
+    if (!(amount > 0)) throw InvalidPayment("Enter a payment amount greater than zero.");
+    const paid = invoice.payments.reduce((s, p) => s + p.amount, 0);
+    if (amount > round(invoice.amount - paid) + 0.01)
+      throw InvalidPayment("Payment exceeds the outstanding balance on this invoice.");
+
+    const payment = {
+      id: uid("pay"),
+      amount: round(amount),
+      method,
+      at: now(),
+      recordedBy: user.name,
+    };
+    const status = reconcile(invoice, [payment]);
+    state = {
+      ...state,
+      invoices: state.invoices.map((i) =>
+        i.id === invoiceId ? { ...i, payments: [...i.payments, payment], status } : i,
+      ),
+    };
+    if (status === "PAID") {
+      const quotation = state.quotations.find((q) => q.id === invoice.quotationId);
+      if (quotation && quotation.stage === "INVOICED") replaceQuotation(transition(quotation, "PAID"));
+    }
+    record(`Recorded payment of ${payment.amount.toFixed(2)}`, "Payment", invoiceId);
+    emit("PaymentRecorded", `${invoice.number} · ${payment.amount.toFixed(2)}`);
+    notify();
+    return status;
+  },
+
+  modifySubscription(subscriptionId: string, qty: number) {
+    const user = requireSession();
+    assertCan(user.role, "billing.manage");
+    const sub = state.subscriptions.find((s) => s.id === subscriptionId);
+    if (!sub) return;
+    if (sub.status === "CANCELLED")
+      throw SubscriptionModificationInvalid("A cancelled subscription cannot be modified.");
+    if (qty < 1) throw SubscriptionModificationInvalid("Quantity must be at least one seat.");
+    const proration = calculateProration(sub, qty, sub.unitPrice);
+    const adjustment =
+      proration.kind === "NONE"
+        ? null
+        : {
+            id: uid("adj"),
+            kind: proration.kind,
+            amount: Math.abs(proration.difference),
+            note: `${qty - sub.qty > 0 ? "Added" : "Removed"} ${Math.abs(qty - sub.qty)} seats with ${proration.daysRemaining} of ${proration.daysInCycle} days remaining.`,
+            at: now(),
+          };
+    state = {
+      ...state,
+      subscriptions: state.subscriptions.map((s) =>
+        s.id === subscriptionId
+          ? { ...s, qty, adjustments: adjustment ? [adjustment, ...s.adjustments] : s.adjustments }
+          : s,
+      ),
+    };
+    record(`Changed seats to ${qty}`, "Subscription", subscriptionId);
+    emit("ProrationCalculated", `${subscriptionId} · ${proration.difference.toFixed(2)}`);
+    emit("SubscriptionModified", subscriptionId);
+    notify();
+    return proration;
+  },
+
+  setSubscriptionStatus(subscriptionId: string, status: Subscription["status"]) {
+    const user = requireSession();
+    assertCan(user.role, "billing.manage");
+    state = {
+      ...state,
+      subscriptions: state.subscriptions.map((s) =>
+        s.id === subscriptionId
+          ? {
+              ...s,
+              status,
+              nextBillDate:
+                status === "ACTIVE" ? addCycle(now(), s.cycle) : s.nextBillDate,
+            }
+          : s,
+      ),
+    };
+    record(`Subscription ${status.toLowerCase()}`, "Subscription", subscriptionId);
+    emit(status === "CANCELLED" ? "SubscriptionCancelled" : "SubscriptionModified", subscriptionId);
+    notify();
+  },
+};
+
+/* ------------------------------------------------------------ negotiation */
+
+export const negotiationActions = {
+  submitRequest(
+    quotationId: string,
+    input: { lineId: string; requestedDiscountPct: number; note: string }[],
+    comment: string,
+    requestedDeliveryDate?: string,
+  ) {
+    const user = requireSession();
+    assertCan(user.role, "portal.use");
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation) return;
+    if (user.customerId !== quotation.customerId)
+      throw ApprovalRequired("This quotation belongs to another account.");
+
+    const requests: NegotiationRequest[] = input.map((r) => ({
+      id: uid("r"),
+      lineId: r.lineId,
+      requestedDiscountPct: r.requestedDiscountPct,
+      note: r.note,
+      status: "OPEN",
+      at: now(),
+    }));
+    const messages = comment.trim()
+      ? [
+          ...quotation.messages,
+          {
+            id: uid("m"),
+            author: user.name,
+            role: user.role,
+            body: comment.trim(),
+            at: now(),
+          },
+        ]
+      : quotation.messages;
+
+    const next: Quotation = {
+      ...quotation,
+      requests: [...quotation.requests, ...requests],
+      messages,
+      stage: quotation.stage === "CONFIRMED" ? quotation.stage : "NEGOTIATION",
+      updatedAt: now(),
+      ...(requestedDeliveryDate ? { requestedDeliveryDate } : {}),
+    };
+    replaceQuotation(next);
+    record("Customer submitted a negotiation request", "Quotation", quotationId, comment);
+    emit("NegotiationRequested", quotation.number);
+    notify();
+  },
+
+  reply(quotationId: string, body: string) {
+    const user = requireSession();
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation || !body.trim()) return;
+    replaceQuotation({
+      ...quotation,
+      messages: [
+        ...quotation.messages,
+        { id: uid("m"), author: user.name, role: user.role, body: body.trim(), at: now() },
+      ],
+      updatedAt: now(),
+    });
+    notify();
+  },
+
+  /**
+   * Accepting a counter-discount rewrites the line, re-runs governance and
+   * re-routes the quote to approval when the new terms break policy.
+   */
+  respond(quotationId: string, requestId: string, accept: boolean, note: string) {
+    const user = requireSession();
+    assertCan(user.role, "quotation.edit");
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    const request = quotation?.requests.find((r) => r.id === requestId);
+    if (!quotation || !request) return null;
+
+    let lines = quotation.lines;
+    if (accept) {
+      lines = quotation.lines.map((l) =>
+        l.id === request.lineId ? { ...l, discountPct: request.requestedDiscountPct } : l,
+      );
+    }
+    let next: Quotation = {
+      ...quotation,
+      lines,
+      requests: quotation.requests.map((r) =>
+        r.id === requestId ? { ...r, status: accept ? "ACCEPTED" : "DECLINED" } : r,
+      ),
+      messages: [
+        ...quotation.messages,
+        {
+          id: uid("m"),
+          author: user.name,
+          role: user.role,
+          body: note.trim() || (accept ? "Revised terms accepted." : "We cannot apply that discount."),
+          lineId: request.lineId,
+          at: now(),
+        },
+      ],
+      updatedAt: now(),
+    };
+
+    const evaluation = calculateBlendedRisk(
+      next,
+      tierOf(state, next),
+      productMap(state),
+      state.governance,
+    );
+    let reapproval = false;
+    if (accept && evaluation.approvalChain.length > 0) {
+      reapproval = true;
+      next = { ...next, stage: "PENDING_APPROVAL" };
+      const approval: Approval = {
+        id: uid("a"),
+        quotationId,
+        status: "PENDING",
+        riskLevel: evaluation.riskLevel,
+        submittedBy: user.id,
+        submittedAt: now(),
+        steps: evaluation.approvalChain.map((role) => ({ role, status: "PENDING" as const })),
+      };
+      state = {
+        ...state,
+        approvals: [approval, ...state.approvals.filter((a) => a.quotationId !== quotationId)],
+      };
+      emit("QuotationReapprovalTriggered", `${quotation.number} · ${evaluation.riskLevel}`);
+    } else if (accept) {
+      next = { ...next, stage: "APPROVED" };
+      emit("NegotiationAccepted", quotation.number);
+    }
+
+    replaceQuotation(next);
+    record(
+      accept ? `Accepted counter discount of ${request.requestedDiscountPct}%` : "Declined counter discount",
+      "Negotiation",
+      quotationId,
+      note,
+    );
+    notify();
+    return { reapproval, evaluation };
+  },
+};
+
+/* ------------------------------------------------------------------ admin */
+
+export const adminActions = {
+  saveProduct(product: Product) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    const exists = state.products.some((p) => p.id === product.id);
+    set({
+      products: exists
+        ? state.products.map((p) => (p.id === product.id ? product : p))
+        : [...state.products, product],
+    });
+    record(exists ? `Updated ${product.name}` : `Created ${product.name}`, "Product", product.id);
+  },
+
+  setTierCeiling(tier: CustomerTier, pct: number) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    set({
+      governance: {
+        ...state.governance,
+        tierCeilings: { ...state.governance.tierCeilings, [tier]: pct },
+      },
+    });
+    record(`${tier} ceiling set to ${pct}%`, "DiscountRule", tier);
+  },
+
+  setCategoryCeiling(category: ProductCategory, pct: number) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    set({
+      governance: {
+        ...state.governance,
+        categoryCeilings: { ...state.governance.categoryCeilings, [category]: pct },
+      },
+    });
+    record(`${category} ceiling set to ${pct}%`, "DiscountRule", category);
+  },
+
+  saveWarehouse(warehouse: Warehouse) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    set({ warehouses: state.warehouses.map((w) => (w.id === warehouse.id ? warehouse : w)) });
+    record(`Updated ${warehouse.name}`, "Warehouse", warehouse.id);
+  },
+
+  savePlan(plan: SubscriptionPlan) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    set({ plans: state.plans.map((p) => (p.id === plan.id ? plan : p)) });
+    record(`Updated ${plan.name}`, "SubscriptionPlan", plan.id);
+  },
+};

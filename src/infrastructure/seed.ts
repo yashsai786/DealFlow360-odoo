@@ -1,0 +1,509 @@
+import type {
+  Approval,
+  AuditEntry,
+  Customer,
+  DomainEvent,
+  FulfillmentOrder,
+  InventoryItem,
+  Invoice,
+  Product,
+  Quotation,
+  Subscription,
+  SubscriptionPlan,
+  User,
+  Warehouse,
+} from "../modules/shared/types";
+
+const day = 86400000;
+const ago = (d: number) => new Date(Date.now() - d * day).toISOString();
+const ahead = (d: number) => new Date(Date.now() + d * day).toISOString();
+
+export const USERS: User[] = [
+  { id: "u-rep1", name: "Priya Raman", email: "rep@dealflow360.io", role: "SALES_REP" },
+  { id: "u-rep2", name: "Marcus Feld", email: "rep2@dealflow360.io", role: "SALES_REP" },
+  {
+    id: "u-mgr",
+    name: "Dana Whitfield",
+    email: "manager@dealflow360.io",
+    role: "SALES_MANAGER",
+  },
+  { id: "u-fin", name: "Owen Vasquez", email: "finance@dealflow360.io", role: "FINANCE" },
+  { id: "u-admin", name: "Sasha Idris", email: "admin@dealflow360.io", role: "ADMIN" },
+  {
+    id: "u-cust-acme",
+    name: "Lena Ortiz",
+    email: "acme@customer.io",
+    role: "CUSTOMER",
+    customerId: "c-acme",
+  },
+  {
+    id: "u-cust-beta",
+    name: "Ravi Kapoor",
+    email: "beta@customer.io",
+    role: "CUSTOMER",
+    customerId: "c-beta",
+  },
+];
+
+export const CUSTOMERS: Customer[] = [
+  {
+    id: "c-acme",
+    name: "Acme Corp",
+    tier: "Gold",
+    industry: "Manufacturing",
+    contactEmail: "procurement@acme.test",
+  },
+  {
+    id: "c-delta",
+    name: "Delta Systems",
+    tier: "Silver",
+    industry: "Logistics",
+    contactEmail: "buying@delta.test",
+  },
+  {
+    id: "c-beta",
+    name: "Beta Industries",
+    tier: "Bronze",
+    industry: "Construction",
+    contactEmail: "ops@beta.test",
+  },
+  {
+    id: "c-nova",
+    name: "Nova Technologies",
+    tier: "Gold",
+    industry: "Software",
+    contactEmail: "finance@nova.test",
+  },
+  {
+    id: "c-zenith",
+    name: "Zenith Solutions",
+    tier: "Silver",
+    industry: "Healthcare",
+    contactEmail: "purchasing@zenith.test",
+  },
+];
+
+export const PRODUCTS: Product[] = [
+  {
+    id: "p-laptop",
+    name: "Enterprise Laptop",
+    category: "Hardware",
+    unit: "unit",
+    price: 1850,
+    cost: 1400,
+    taxPct: 8,
+    description: "14-inch business laptop, 32 GB RAM, 1 TB SSD, 3-year chassis cover.",
+  },
+  {
+    id: "p-network",
+    name: "Network Equipment",
+    category: "Hardware",
+    unit: "unit",
+    price: 2400,
+    cost: 1750,
+    taxPct: 8,
+    description: "Managed 48-port switch with redundant power for branch rollouts.",
+  },
+  {
+    id: "p-setup",
+    name: "Setup Service",
+    category: "Services",
+    unit: "device",
+    price: 600,
+    cost: 300,
+    taxPct: 5,
+    description: "On-site imaging, asset tagging and hand-over per device.",
+  },
+  {
+    id: "p-implementation",
+    name: "Implementation Service",
+    category: "Services",
+    unit: "engagement",
+    price: 1200,
+    cost: 620,
+    taxPct: 5,
+    description: "Network design, configuration and cutover engagement.",
+  },
+  {
+    id: "p-warranty",
+    name: "Extended Warranty",
+    category: "Services",
+    unit: "unit",
+    price: 320,
+    cost: 120,
+    taxPct: 5,
+    description: "Next-business-day parts and labour cover for 36 months.",
+  },
+  {
+    id: "p-careplan",
+    name: "Cloud Care Plan",
+    category: "Subscriptions",
+    unit: "seat / month",
+    price: 95,
+    cost: 38,
+    taxPct: 5,
+    description: "Monitoring, patching and 24x7 helpdesk per managed seat.",
+    cycle: "Monthly",
+  },
+];
+
+export const WAREHOUSES: Warehouse[] = [
+  { id: "wh-main", name: "Main Warehouse", location: "Rotterdam, NL", shipmentCost: 42 },
+  { id: "wh-east", name: "East Depot", location: "Warsaw, PL", shipmentCost: 29 },
+  { id: "wh-west", name: "West Hub", location: "Dublin, IE", shipmentCost: 61 },
+];
+
+export const INVENTORY: InventoryItem[] = [
+  { warehouseId: "wh-main", productId: "p-laptop", available: 18, reserved: 0, replenishmentDays: 6 },
+  { warehouseId: "wh-east", productId: "p-laptop", available: 6, reserved: 0, replenishmentDays: 3 },
+  { warehouseId: "wh-west", productId: "p-laptop", available: 0, reserved: 0, replenishmentDays: 9 },
+  { warehouseId: "wh-main", productId: "p-network", available: 12, reserved: 2, replenishmentDays: 8 },
+  { warehouseId: "wh-east", productId: "p-network", available: 4, reserved: 0, replenishmentDays: 5 },
+  { warehouseId: "wh-west", productId: "p-network", available: 7, reserved: 1, replenishmentDays: 7 },
+];
+
+export const PLANS: SubscriptionPlan[] = [
+  {
+    id: "sp-monthly",
+    name: "Cloud Care — Monthly",
+    cycle: "Monthly",
+    price: 95,
+    prorationEnabled: true,
+    cancellationPolicy: "Cancel any time, effective at the end of the current period.",
+  },
+  {
+    id: "sp-quarterly",
+    name: "Cloud Care — Quarterly",
+    cycle: "Quarterly",
+    price: 265,
+    prorationEnabled: true,
+    cancellationPolicy: "30 days notice, unused period credited.",
+  },
+  {
+    id: "sp-yearly",
+    name: "Cloud Care — Annual",
+    cycle: "Yearly",
+    price: 990,
+    prorationEnabled: false,
+    cancellationPolicy: "Non-refundable for the committed year.",
+  },
+];
+
+export const QUOTATIONS: Quotation[] = [
+  {
+    id: "q-1041",
+    number: "Q-1041",
+    customerId: "c-acme",
+    ownerId: "u-rep1",
+    stage: "PENDING_APPROVAL",
+    createdAt: ago(6),
+    updatedAt: ago(4),
+    promisedDeliveryDate: ahead(14),
+    lines: [
+      { id: "l-1", productId: "p-laptop", qty: 24, unitPrice: 1850, discountPct: 12, taxPct: 8 },
+      { id: "l-2", productId: "p-setup", qty: 24, unitPrice: 600, discountPct: 18, taxPct: 5 },
+    ],
+    messages: [],
+    requests: [],
+    dismissedRecommendations: [],
+  },
+  {
+    id: "q-1042",
+    number: "Q-1042",
+    customerId: "c-delta",
+    ownerId: "u-rep2",
+    stage: "APPROVED",
+    createdAt: ago(12),
+    updatedAt: ago(2),
+    lines: [
+      { id: "l-1", productId: "p-network", qty: 6, unitPrice: 2400, discountPct: 8, taxPct: 8 },
+      {
+        id: "l-2",
+        productId: "p-implementation",
+        qty: 2,
+        unitPrice: 1200,
+        discountPct: 6,
+        taxPct: 5,
+      },
+    ],
+    messages: [],
+    requests: [],
+    dismissedRecommendations: [],
+  },
+  {
+    id: "q-1043",
+    number: "Q-1043",
+    customerId: "c-beta",
+    ownerId: "u-rep2",
+    stage: "NEGOTIATION",
+    createdAt: ago(9),
+    updatedAt: ago(1),
+    requestedDeliveryDate: ahead(21),
+    lines: [
+      { id: "l-1", productId: "p-laptop", qty: 8, unitPrice: 1850, discountPct: 4, taxPct: 8 },
+      { id: "l-2", productId: "p-warranty", qty: 8, unitPrice: 320, discountPct: 3, taxPct: 5 },
+    ],
+    messages: [
+      {
+        id: "m-1",
+        author: "Ravi Kapoor",
+        role: "CUSTOMER",
+        body: "Can you improve the laptop line? Our board approved a tighter budget.",
+        lineId: "l-1",
+        at: ago(1),
+      },
+      {
+        id: "m-2",
+        author: "Marcus Feld",
+        role: "SALES_REP",
+        body: "Reviewing options now — I will come back with revised terms today.",
+        at: ago(1),
+      },
+    ],
+    requests: [
+      {
+        id: "r-1",
+        lineId: "l-1",
+        requestedDiscountPct: 9,
+        note: "Budget approval requires a better unit price.",
+        status: "OPEN",
+        at: ago(1),
+      },
+    ],
+    dismissedRecommendations: [],
+  },
+  {
+    id: "q-1044",
+    number: "Q-1044",
+    customerId: "c-nova",
+    ownerId: "u-rep1",
+    stage: "FULFILLMENT",
+    createdAt: ago(20),
+    updatedAt: ago(3),
+    promisedDeliveryDate: ago(2),
+    lines: [
+      { id: "l-1", productId: "p-laptop", qty: 30, unitPrice: 1850, discountPct: 6, taxPct: 8 },
+      { id: "l-2", productId: "p-careplan", qty: 30, unitPrice: 95, discountPct: 5, taxPct: 5 },
+    ],
+    messages: [],
+    requests: [],
+    dismissedRecommendations: [],
+  },
+  {
+    id: "q-1045",
+    number: "Q-1045",
+    customerId: "c-zenith",
+    ownerId: "u-rep2",
+    stage: "INVOICED",
+    createdAt: ago(30),
+    updatedAt: ago(8),
+    lines: [
+      { id: "l-1", productId: "p-laptop", qty: 10, unitPrice: 1850, discountPct: 5, taxPct: 8 },
+      { id: "l-2", productId: "p-warranty", qty: 10, unitPrice: 320, discountPct: 4, taxPct: 5 },
+    ],
+    messages: [],
+    requests: [],
+    dismissedRecommendations: [],
+  },
+  {
+    id: "q-1046",
+    number: "Q-1046",
+    customerId: "c-acme",
+    ownerId: "u-rep1",
+    stage: "DRAFT",
+    createdAt: ago(24),
+    updatedAt: ago(18),
+    lines: [
+      { id: "l-1", productId: "p-network", qty: 5, unitPrice: 2400, discountPct: 19, taxPct: 8 },
+      {
+        id: "l-2",
+        productId: "p-implementation",
+        qty: 3,
+        unitPrice: 1200,
+        discountPct: 22,
+        taxPct: 5,
+      },
+    ],
+    messages: [],
+    requests: [],
+    dismissedRecommendations: [],
+  },
+  {
+    id: "q-1047",
+    number: "Q-1047",
+    customerId: "c-nova",
+    ownerId: "u-rep1",
+    stage: "PAID",
+    createdAt: ago(52),
+    updatedAt: ago(40),
+    lines: [
+      { id: "l-1", productId: "p-laptop", qty: 12, unitPrice: 1850, discountPct: 3, taxPct: 8 },
+      { id: "l-2", productId: "p-setup", qty: 12, unitPrice: 600, discountPct: 2, taxPct: 5 },
+    ],
+    messages: [],
+    requests: [],
+    dismissedRecommendations: [],
+  },
+];
+
+export const APPROVALS: Approval[] = [
+  {
+    id: "a-1041",
+    quotationId: "q-1041",
+    status: "PENDING",
+    riskLevel: "HIGH",
+    submittedBy: "u-rep1",
+    submittedAt: ago(4),
+    steps: [
+      { role: "SALES_MANAGER", status: "PENDING" },
+      { role: "FINANCE", status: "PENDING" },
+    ],
+  },
+  {
+    id: "a-1042",
+    quotationId: "q-1042",
+    status: "APPROVED",
+    riskLevel: "MEDIUM",
+    submittedBy: "u-rep2",
+    submittedAt: ago(5),
+    steps: [
+      {
+        role: "SALES_MANAGER",
+        status: "APPROVED",
+        decidedBy: "Dana Whitfield",
+        decidedAt: ago(2),
+        reason: "Volume justifies the blended discount.",
+      },
+    ],
+  },
+  {
+    id: "a-1046",
+    quotationId: "q-1046",
+    status: "RETURNED",
+    riskLevel: "HIGH",
+    submittedBy: "u-rep1",
+    submittedAt: ago(20),
+    steps: [
+      {
+        role: "SALES_MANAGER",
+        status: "RETURNED",
+        decidedBy: "Dana Whitfield",
+        decidedAt: ago(18),
+        reason: "Service discount is far outside policy — rebuild the pricing.",
+      },
+      { role: "FINANCE", status: "PENDING" },
+    ],
+  },
+];
+
+export const ORDERS: FulfillmentOrder[] = [
+  {
+    id: "f-1044",
+    quotationId: "q-1044",
+    status: "AWAITING",
+    allocations: [],
+    backorders: [],
+    createdAt: ago(3),
+    dueAt: ago(2),
+  },
+  {
+    id: "f-1045",
+    quotationId: "q-1045",
+    status: "SHIPPED",
+    allocations: [
+      { warehouseId: "wh-main", productId: "p-laptop", qty: 10, shipmentCost: 42 },
+    ],
+    backorders: [],
+    createdAt: ago(20),
+    shippedAt: ago(12),
+    dueAt: ago(11),
+  },
+];
+
+export const SUBSCRIPTIONS: Subscription[] = [
+  {
+    id: "s-2001",
+    customerId: "c-nova",
+    quotationId: "q-1044",
+    planId: "sp-monthly",
+    qty: 30,
+    unitPrice: 90.25,
+    cycle: "Monthly",
+    startDate: ago(3),
+    nextBillDate: ahead(9),
+    status: "ACTIVE",
+    adjustments: [],
+  },
+];
+
+export const INVOICES: Invoice[] = [
+  {
+    id: "i-5001",
+    number: "INV-5001",
+    customerId: "c-zenith",
+    quotationId: "q-1045",
+    amount: 21158.4,
+    status: "PARTIALLY_PAID",
+    issuedAt: ago(8),
+    dueDate: ahead(7),
+    payments: [
+      { id: "pay-1", amount: 9000, method: "Bank transfer", at: ago(5), recordedBy: "Owen Vasquez" },
+    ],
+  },
+  {
+    id: "i-5002",
+    number: "INV-5002",
+    customerId: "c-nova",
+    quotationId: "q-1047",
+    amount: 30011.04,
+    status: "PAID",
+    issuedAt: ago(40),
+    dueDate: ago(10),
+    payments: [
+      {
+        id: "pay-2",
+        amount: 30011.04,
+        method: "Bank transfer",
+        at: ago(35),
+        recordedBy: "Owen Vasquez",
+      },
+    ],
+  },
+];
+
+export const AUDIT: AuditEntry[] = [
+  {
+    id: "au-1",
+    entity: "Quotation",
+    entityId: "q-1041",
+    actor: "Priya Raman",
+    action: "Submitted for approval",
+    reason: "Customer needs pricing before month end.",
+    at: ago(4),
+  },
+  {
+    id: "au-2",
+    entity: "Approval",
+    entityId: "q-1042",
+    actor: "Dana Whitfield",
+    action: "Approved",
+    reason: "Volume justifies the blended discount.",
+    at: ago(2),
+  },
+  {
+    id: "au-3",
+    entity: "Payment",
+    entityId: "i-5001",
+    actor: "Owen Vasquez",
+    action: "Recorded payment of 9,000.00",
+    at: ago(5),
+  },
+];
+
+export const EVENTS: DomainEvent[] = [
+  { id: "e-1", name: "QuotationSubmittedForApproval", payload: "Q-1041", at: ago(4) },
+  { id: "e-2", name: "DiscountRiskDetected", payload: "Q-1041 · HIGH", at: ago(4) },
+  { id: "e-3", name: "ApprovalGranted", payload: "Q-1042 · Sales Manager", at: ago(2) },
+  { id: "e-4", name: "SubscriptionCreated", payload: "Nova Technologies · Cloud Care", at: ago(3) },
+  { id: "e-5", name: "PaymentRecorded", payload: "INV-5001 · 9,000.00", at: ago(5) },
+];
