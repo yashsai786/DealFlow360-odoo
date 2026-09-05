@@ -10,6 +10,7 @@ import type {
   ApprovalStep,
   ApprovalStepStatus,
   Quotation,
+  NegotiationMessage,
 } from "../modules/shared/types";
 import { assertCan } from "../modules/identity/service";
 
@@ -115,7 +116,18 @@ export class ApprovalApplicationService {
 
     if (quotation) {
       if (decision === "APPROVED" && chainComplete) {
-        updatedQuotation = await quotationRepository.update(quotation.id, { stage: "APPROVED" });
+        const approvedMsg: NegotiationMessage = {
+          id: uid("msg"),
+          author: `${actor.name} (${step.role.replace("_", " ")})`,
+          role: actor.role,
+          body: `All commercial terms approved by ${step.role.replace("_", " ")}.`,
+          quotationId: quotation.id,
+          at: now(),
+        };
+        updatedQuotation = await quotationRepository.update(quotation.id, {
+          stage: "APPROVED",
+          messages: [...(quotation.messages || []), approvedMsg],
+        });
         await domainEventRepository.emit({
           id: uid("evt"),
           name: "QuotationApproved",
@@ -123,7 +135,18 @@ export class ApprovalApplicationService {
           at: now(),
         });
       } else if (decision === "RETURNED") {
-        updatedQuotation = await quotationRepository.update(quotation.id, { stage: "DRAFT" });
+        const returnMsg: NegotiationMessage = {
+          id: uid("msg"),
+          author: `${actor.name} (${step.role.replace("_", " ")})`,
+          role: actor.role,
+          body: `[Revision Required by ${step.role.replace("_", " ")}]: ${reason?.trim()}`,
+          quotationId: quotation.id,
+          at: now(),
+        };
+        updatedQuotation = await quotationRepository.update(quotation.id, {
+          stage: "DRAFT",
+          messages: [...(quotation.messages || []), returnMsg],
+        });
         await domainEventRepository.emit({
           id: uid("evt"),
           name: "ApprovalReturned",
@@ -131,7 +154,18 @@ export class ApprovalApplicationService {
           at: now(),
         });
       } else if (decision === "REJECTED") {
-        updatedQuotation = await quotationRepository.update(quotation.id, { stage: "CANCELLED" });
+        const rejectMsg: NegotiationMessage = {
+          id: uid("msg"),
+          author: `${actor.name} (${step.role.replace("_", " ")})`,
+          role: actor.role,
+          body: `[Proposal Rejected by ${step.role.replace("_", " ")}]: ${reason?.trim()}`,
+          quotationId: quotation.id,
+          at: now(),
+        };
+        updatedQuotation = await quotationRepository.update(quotation.id, {
+          stage: "CANCELLED",
+          messages: [...(quotation.messages || []), rejectMsg],
+        });
         await domainEventRepository.emit({
           id: uid("evt"),
           name: "ApprovalRejected",

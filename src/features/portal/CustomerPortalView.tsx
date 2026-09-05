@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   useAppState,
   productMap,
@@ -6,7 +6,7 @@ import {
   totalsOf,
   negotiationActions,
 } from "../../infrastructure/store";
-import type { Quotation } from "../../modules/shared/types";
+import type { Quotation, Approval } from "../../modules/shared/types";
 import { lineNet } from "../../modules/quotations/service";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
@@ -45,9 +45,9 @@ import { toast } from "sonner";
  * - Under Review: Exceeds discount ceilings, pending managerial sign-off
  * - Confirmed: Finalized order moving to fulfillment
  */
-export function getCustomerStatus(quotation: Quotation): {
-  label: "Sent" | "Under Negotiation" | "Under Review" | "Confirmed";
-  variant: "default" | "secondary" | "outline";
+export function getCustomerStatus(quotation: Quotation, relatedApproval?: Approval | null): {
+  label: "Sent" | "Under Negotiation" | "Under Review" | "Confirmed" | "Revision Required" | "Cancelled";
+  variant: "default" | "secondary" | "outline" | "destructive";
   badgeClass: string;
   description: string;
 } {
@@ -64,6 +64,31 @@ export function getCustomerStatus(quotation: Quotation): {
       description: "Quotation signed & accepted. Transferred to warehouse fulfillment.",
     };
   }
+
+  // Check if quotation or its approval was returned for revision
+  const isReturned =
+    relatedApproval?.status === "RETURNED" ||
+    relatedApproval?.steps.some((s) => s.status === "RETURNED") ||
+    quotation.messages.some((m) => m.body.includes("[Revision Required"));
+
+  if (isReturned) {
+    return {
+      label: "Revision Required",
+      variant: "outline",
+      badgeClass: "border-amber-500 text-amber-700 dark:text-amber-400 font-bold bg-amber-50 dark:bg-amber-950/40",
+      description: "Returned for revision. Please review feedback below and submit updated terms.",
+    };
+  }
+
+  if (quotation.stage === "CANCELLED" || relatedApproval?.status === "REJECTED") {
+    return {
+      label: "Cancelled",
+      variant: "destructive",
+      badgeClass: "bg-destructive text-destructive-foreground font-semibold",
+      description: "Commercial proposal was rejected or cancelled.",
+    };
+  }
+
   if (quotation.stage === "PENDING_APPROVAL") {
     return {
       label: "Under Review",
@@ -140,13 +165,58 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
   });
 
   const quotation = myQuotations.find((q) => q.id === selectedQuoteId);
+  const relatedApproval = quotation
+    ? state.approvals.find((a) => a.quotationId === quotation.id)
+    : null;
   const totals = quotation ? totalsOf(state, quotation) : null;
-  const statusInfo = quotation ? getCustomerStatus(quotation) : null;
+  const statusInfo = quotation ? getCustomerStatus(quotation, relatedApproval) : null;
   const isLocked =
     quotation?.stage === "CONFIRMED" ||
     quotation?.stage === "FULFILLMENT" ||
     quotation?.stage === "INVOICED" ||
     quotation?.stage === "PAID";
+
+  // Find feedback from returned or rejected approval steps
+  const returnedStep = relatedApproval?.steps
+    .slice()
+    .reverse()
+    .find((s) => s.status === "RETURNED" && s.reason);
+
+  const rejectedStep = relatedApproval?.steps
+    .slice()
+    .reverse()
+    .find((s) => s.status === "REJECTED" && s.reason);
+
+  const latestFeedback = returnedStep || rejectedStep;
+
+  // Merge messages from quotation.messages with any approval return/reject step feedback
+  const combinedMessages = useMemo(() => {
+    if (!quotation) return [];
+    const msgs = [...quotation.messages];
+
+    // If there is approval step feedback not yet in quotation.messages, include it
+    if (relatedApproval) {
+      for (const step of relatedApproval.steps) {
+        if ((step.status === "RETURNED" || step.status === "REJECTED") && step.reason) {
+          const actionText = step.status === "RETURNED" ? "Revision Required" : "Proposal Rejected";
+          const alreadyPresent = msgs.some(
+            (m) => m.body.includes(step.reason!) || (step.decidedAt && m.at === step.decidedAt),
+          );
+          if (!alreadyPresent) {
+            msgs.push({
+              id: `msg-approval-${step.role}`,
+              author: `${step.decidedBy || "Executive"} (${step.role.replace("_", " ")})`,
+              role: "ADMIN" as any,
+              body: `[${actionText} by ${step.role.replace("_", " ")}]: ${step.reason}`,
+              at: step.decidedAt || quotation.createdAt,
+            });
+          }
+        }
+      }
+    }
+
+    return msgs.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  }, [quotation, relatedApproval]);
 
   // Line-level counter proposals and comments state
   const [lineProposals, setLineProposals] = useState<
@@ -370,7 +440,8 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
               filteredQuotations.map((q) => {
               const active = q.id === selectedQuoteId;
               const qTotals = totalsOf(state, q);
-              const qStatus = getCustomerStatus(q);
+              const qApproval = state.approvals.find((a) => a.quotationId === q.id);
+              const qStatus = getCustomerStatus(q, qApproval);
 
               return (
                 <div
@@ -396,11 +467,16 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
                   </div>
                   <div className="text-[10px] text-muted-foreground mt-1 flex justify-between items-center pt-1 border-t border-border/40">
                     <span>Issued: {new Date(q.createdAt).toLocaleDateString()}</span>
-                    {q.requests.some((r) => r.status === "OPEN") && (
+                    {qApproval?.status === "RETURNED" ? (
+                      <span className="text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3" />
+                        Revision requested
+                      </span>
+                    ) : q.requests.some((r) => r.status === "OPEN") ? (
                       <span className="text-indigo-600 dark:text-indigo-400 font-medium">
                         Active revision
                       </span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               );
@@ -463,6 +539,53 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
                 </CardHeader>
 
                 <CardContent className="p-4 space-y-6">
+                  {/* Prominent Reviewer Feedback Banner when Returned for Revision or Rejected */}
+                  {latestFeedback && (
+                    <div
+                      className={`p-4 rounded-xl border flex items-start gap-3.5 shadow-xs ${
+                        latestFeedback.status === "REJECTED"
+                          ? "border-destructive/30 bg-destructive/10 text-destructive-foreground"
+                          : "border-amber-400 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200"
+                      }`}
+                    >
+                      <div
+                        className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+                          latestFeedback.status === "REJECTED"
+                            ? "bg-destructive/20 text-destructive"
+                            : "bg-amber-500/20 text-amber-700 dark:text-amber-400"
+                        }`}
+                      >
+                        <AlertTriangle className="h-4 w-4" />
+                      </div>
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
+                            {latestFeedback.status === "REJECTED"
+                              ? "Commercial Proposal Rejected"
+                              : "Commercial Terms Returned for Revision"}
+                            <span className="font-normal text-muted-foreground">
+                              by <strong className="text-foreground">{latestFeedback.decidedBy}</strong> (
+                              {latestFeedback.role.replace("_", " ")})
+                            </span>
+                          </span>
+                          {latestFeedback.decidedAt && (
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              {new Date(latestFeedback.decidedAt).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs p-2.5 rounded-md bg-background/80 border border-border/60 font-mono text-foreground font-medium">
+                          &ldquo;{latestFeedback.reason}&rdquo;
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          {latestFeedback.status === "REJECTED"
+                            ? "This proposal has been rejected by leadership. Please contact your account executive for assistance."
+                            : "Please adjust your proposed counter-discounts or delivery date below, then click 'Submit Request' to re-route for priority review."}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Proposal Summary Bar */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-lg bg-muted/30 border border-border text-xs">
                     <div>
@@ -639,18 +762,20 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
                         <span>Direct Account Messages & History</span>
                       </div>
                       <span className="text-[10px] text-muted-foreground">
-                        {quotation.messages.length} messages exchanged
+                        {combinedMessages.length} messages exchanged
                       </span>
                     </div>
 
                     <div className="space-y-2 max-h-52 overflow-y-auto p-3 rounded-lg border border-border bg-muted/20">
-                      {quotation.messages.map((m) => (
+                      {combinedMessages.map((m) => (
                         <div
                           key={m.id}
                           className={`p-2.5 rounded-lg text-xs space-y-1 max-w-[85%] ${
                             m.role === "CUSTOMER"
                               ? "ml-auto bg-primary text-primary-foreground"
-                              : "bg-card border border-border text-card-foreground"
+                              : m.body.includes("Revision Required")
+                                ? "bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-200"
+                                : "bg-card border border-border text-card-foreground"
                           }`}
                         >
                           <div className="flex items-center justify-between text-[10px] opacity-80 gap-3">
@@ -660,7 +785,7 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
                           <p className="text-xs leading-relaxed">{m.body}</p>
                         </div>
                       ))}
-                      {quotation.messages.length === 0 && (
+                      {combinedMessages.length === 0 && (
                         <p className="text-xs text-muted-foreground text-center py-4">No messages yet. Send a note below to chat with your sales representative.</p>
                       )}
                     </div>
