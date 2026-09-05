@@ -21,6 +21,7 @@ export interface DealIntelligenceInput {
   users: Record<string, User>;
   orders: FulfillmentOrder[];
   approvals: Approval[];
+  stallDaysThreshold?: number;
 }
 
 /** Historical blended discount per rep, used as the anomaly baseline. */
@@ -43,18 +44,19 @@ export function repDiscountAverages(
 }
 
 export function detectStalledDeals(input: DealIntelligenceInput): DealHealthAlert[] {
+  const threshold = input.stallDaysThreshold ?? STALL_DAYS;
   return input.quotations
     .filter(
       (q) =>
         ["DRAFT", "PENDING_APPROVAL", "NEGOTIATION"].includes(q.stage) &&
-        daysSince(q.updatedAt) >= STALL_DAYS,
+        daysSince(q.updatedAt) >= threshold,
     )
     .map((q) => {
       const days = daysSince(q.updatedAt);
       return alert(q, input, {
         issue: "Stalled deal",
-        detail: `No activity for ${days} days while sitting in ${q.stage.toLowerCase().replace("_", " ")}.`,
-        severity: days >= 21 ? "Critical" : days >= 14 ? "At Risk" : "Watch",
+        detail: `No activity for ${days} days (threshold: ${threshold}d) while sitting in ${q.stage.toLowerCase().replace("_", " ")}.`,
+        severity: days >= threshold * 3 ? "Critical" : days >= threshold * 2 ? "At Risk" : "Watch",
         recommendedAction: "Nudge the owner to re-engage the customer",
       });
     });
