@@ -97,9 +97,9 @@ export function AppShell({
   ).length;
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col antialiased">
+    <div className="h-screen h-[100dvh] overflow-hidden bg-background text-foreground flex flex-col antialiased">
       {/* Top Header */}
-      <header className="sticky top-0 z-40 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 lg:px-6 h-14 flex items-center justify-between">
+      <header className="sticky top-0 z-40 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 lg:px-6 h-14 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -351,16 +351,25 @@ export function AppShell({
       </header>
 
       {/* Main Container */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden relative">
+        {/* Mobile backdrop overlay */}
+        {mobileOpen && (
+          <div
+            className="fixed inset-0 bg-background/80 backdrop-blur-sm z-20 lg:hidden"
+            onClick={() => setMobileOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+
         {/* Sidebar Navigation */}
         <aside
-          className={`fixed inset-y-0 left-0 z-30 w-64 border-r border-border bg-card/50 backdrop-blur lg:static lg:block transition-transform duration-200 ${
+          className={`fixed top-14 bottom-0 left-0 z-30 w-64 border-r border-border bg-card/50 backdrop-blur lg:static lg:top-auto lg:bottom-auto lg:block transition-transform duration-200 shrink-0 h-[calc(100dvh-3.5rem)] lg:h-full ${
             mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
           }`}
         >
-          <div className="flex flex-col h-full py-4 px-3">
+          <div className="flex flex-col h-full py-4 px-3 overflow-hidden">
             {/* Context Header */}
-            <div className="px-2 mb-3">
+            <div className="px-2 mb-3 shrink-0">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 {isCustomer ? (
                   <>
@@ -384,7 +393,7 @@ export function AppShell({
             </div>
 
             {/* Navigation Links */}
-            <nav className="space-y-1 flex-1">
+            <nav className="space-y-1 flex-1 min-h-0 overflow-y-auto pr-1">
               {!isCustomer ? (
                 <>
                   {canAccessPage(session?.role, "dashboard") && (
@@ -600,7 +609,7 @@ export function AppShell({
             </nav>
 
             {/* Sidebar Footer User Details */}
-            <div className="pt-3 mt-auto border-t border-border px-2">
+            <div className="pt-3 mt-auto border-t border-border px-2 shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -628,7 +637,7 @@ export function AppShell({
         </aside>
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 bg-muted/20">
+        <main id="main-content" className="flex-1 overflow-y-auto min-h-0 p-4 md:p-6 lg:p-8 bg-muted/20">
           <div className="max-w-7xl mx-auto">{children}</div>
         </main>
       </div>

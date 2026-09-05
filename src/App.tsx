@@ -51,6 +51,10 @@ export default function App() {
     }
     setCurrentTab(tab);
     window.scrollTo({ top: 0, behavior: "smooth" });
+    const mainEl = document.getElementById("main-content");
+    if (mainEl) {
+      mainEl.scrollTo({ top: 0, behavior: "smooth" });
+    }
   };
 
   const isAuthorized = canAccessPage(session?.role, currentTab);
