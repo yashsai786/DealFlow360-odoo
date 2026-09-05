@@ -36,6 +36,7 @@ import {
   UserCheck,
   Clock,
   History,
+  MessageSquareQuote,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -144,7 +145,14 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
                     }`}
                   >
                     <div className="flex items-center justify-between font-medium">
-                      <span className="font-mono text-primary">{q?.number}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-primary">{q?.number}</span>
+                        {q?.requests && q.requests.length > 0 && (
+                          <Badge variant="outline" className="text-[9px] border-indigo-300 text-indigo-700 dark:text-indigo-300 bg-indigo-50/50 py-0 px-1">
+                            Negotiated
+                          </Badge>
+                        )}
+                      </div>
                       <Badge
                         variant={a.riskLevel === "HIGH" ? "destructive" : "secondary"}
                         className="text-[9px] uppercase font-mono py-0 px-1"
@@ -200,24 +208,28 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
                               ? "outline"
                               : "destructive"
                         }
-                        className="text-[9px] uppercase"
+                        className="text-[9px] uppercase font-mono py-0 px-1"
                       >
                         {a.status}
                       </Badge>
                     </div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">{cust?.name}</div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                      {cust?.name} · {new Date(a.submittedAt).toLocaleDateString()}
+                    </div>
                   </div>
                 );
               })}
+              {pastApprovals.length === 0 && (
+                <p className="text-xs text-muted-foreground py-4 text-center">No past approvals.</p>
+              )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Right 2 Cols: Selected Approval Details */}
+        {/* Right 2 Cols: Detailed Risk & Line Evaluation */}
         <div className="lg:col-span-2 space-y-6">
-          {selectedApproval && quotation && customer ? (
+          {selectedApproval && quotation && customer && totals ? (
             <>
-              {/* Top Summary Card */}
               <Card className="shadow-xs">
                 <CardHeader className="p-4 border-b border-border flex flex-row items-center justify-between">
                   <div>
@@ -229,14 +241,12 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
                         variant={selectedApproval.riskLevel === "HIGH" ? "destructive" : "secondary"}
                         className="text-xs uppercase font-mono"
                       >
-                        Risk Score: {evaluation?.riskScore ?? 0}/100 ({selectedApproval.riskLevel})
-                      </Badge>
-                      <Badge variant="outline" className="text-xs font-mono">
-                        {selectedApproval.status}
+                        {selectedApproval.riskLevel} Risk Approval
                       </Badge>
                     </div>
                     <CardDescription className="text-xs mt-0.5">
-                      Customer: <strong className="text-foreground">{customer.name}</strong> ({customer.tier} Tier) · Contract Value: ₹{totals?.total.toLocaleString()} · Estimated Margin: {totals?.marginPct}%
+                      Customer: <strong>{customer.name}</strong> ({customer.tier} Tier) · Net Value:{" "}
+                      <strong>₹{totals.total.toLocaleString()}</strong>
                     </CardDescription>
                   </div>
                   <Button
@@ -249,6 +259,47 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
                   </Button>
                 </CardHeader>
                 <CardContent className="p-4 space-y-4">
+                  {/* Negotiation Origin Context Banner */}
+                  {quotation.requests.length > 0 && (
+                    <div className="p-3 rounded-lg border border-indigo-200 dark:border-indigo-900 bg-indigo-50/60 dark:bg-indigo-950/30 text-xs space-y-2">
+                      <div className="flex items-center justify-between font-semibold text-indigo-950 dark:text-indigo-200">
+                        <div className="flex items-center gap-1.5">
+                          <MessageSquareQuote className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                          <span>🔁 Re-Entered from Customer Negotiation</span>
+                        </div>
+                        <Badge variant="outline" className="text-[10px] font-mono border-indigo-300 text-indigo-700 dark:text-indigo-300 bg-background/60">
+                          Customer Counter-Proposal
+                        </Badge>
+                      </div>
+                      <div className="space-y-1.5 text-[11px]">
+                        {quotation.requests.map((req) => {
+                          const line = quotation.lines.find((l) => l.id === req.lineId);
+                          const prod = products[line?.productId ?? ""];
+                          return (
+                            <div key={req.id} className="p-2 rounded bg-background border border-indigo-100 dark:border-indigo-900/50 text-foreground">
+                              <div className="flex items-center justify-between font-medium">
+                                <span>
+                                  {prod?.name ?? "Line Item"}: Customer requested{" "}
+                                  <strong className="text-indigo-600 dark:text-indigo-400 font-bold">
+                                    {req.requestedDiscountPct}% discount
+                                  </strong>
+                                </span>
+                                <span className="font-mono text-[10px] text-muted-foreground">
+                                  {new Date(req.at).toLocaleDateString()}
+                                </span>
+                              </div>
+                              {req.note && (
+                                <p className="italic text-muted-foreground mt-0.5 text-[11px]">
+                                  "{req.note}"
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Governance Breaches Highlight */}
                   <div className="p-3 rounded-lg border border-rose-200 dark:border-rose-950 bg-rose-50/40 dark:bg-rose-950/20 text-xs space-y-2">
                     <div className="font-semibold text-rose-800 dark:text-rose-300 flex items-center gap-1.5">

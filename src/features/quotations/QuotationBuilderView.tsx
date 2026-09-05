@@ -6,6 +6,7 @@ import {
   totalsOf,
   evaluate,
   quotationActions,
+  negotiationActions,
 } from "../../infrastructure/store";
 import { stageLabel, lineNet, lineMargin } from "../../modules/quotations/service";
 import { getRecommendations } from "../../modules/recommendations/service";
@@ -51,6 +52,10 @@ import {
   TrendingUp,
   Minus,
   Percent,
+  MessageSquare,
+  Share2,
+  Check,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -251,6 +256,59 @@ export function QuotationBuilderView({
     }
   };
 
+  const [repChatInput, setRepChatInput] = useState("");
+
+  const handleRepRespond = (requestId: string, accept: boolean) => {
+    try {
+      const res = negotiationActions.respond(
+        quotation.id,
+        requestId,
+        accept,
+        accept
+          ? "Counter terms accepted by sales account executive."
+          : "Cannot honor requested discount terms due to margin requirements."
+      );
+      if (res?.reapproval) {
+        toast.warning(
+          `Counter discount accepted! Terms exceed policy ceilings, triggering automated RE-APPROVAL at ${res.evaluation.riskLevel} risk!`,
+          { duration: 6000 }
+        );
+      } else {
+        toast.success(accept ? "Counter discount accepted." : "Counter discount declined.");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Action failed");
+    }
+  };
+
+  const handleRepSendMessage = () => {
+    if (!quotation || !repChatInput.trim()) return;
+    try {
+      negotiationActions.reply(quotation.id, repChatInput);
+      setRepChatInput("");
+      toast.success("Message sent to customer portal.");
+    } catch (err: any) {
+      toast.error(err.message || "Message failed");
+    }
+  };
+
+  const handleShareWithCustomer = async () => {
+    try {
+      if (quotation.stage === "DRAFT") {
+        const res = await quotationActions.submitForApproval(quotation.id);
+        if (!res?.autoApproved) {
+          toast.warning(
+            `Quotation contains elevated discounts (${res?.evaluation.riskLevel} risk). Manager approval required before customer signature.`
+          );
+          return;
+        }
+      }
+      toast.success(`Quotation ${quotation.number} shared with Customer Portal for review and signature.`);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to share quotation");
+    }
+  };
+
   const filteredProducts = state.products.filter(
     (p) => categoryFilter === "all" || p.category === categoryFilter,
   );
@@ -291,7 +349,7 @@ export function QuotationBuilderView({
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {quotation.stage === "DRAFT" && (
             <Button
               size="sm"
@@ -317,6 +375,18 @@ export function QuotationBuilderView({
             </Button>
           )}
 
+          {["DRAFT", "APPROVED"].includes(quotation.stage) && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleShareWithCustomer}
+              className="h-8 text-xs font-medium border-sky-300 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
+            >
+              <Share2 className="h-3.5 w-3.5 mr-1.5" />
+              Share with Customer
+            </Button>
+          )}
+
           {quotation.stage === "APPROVED" && (
             <Button
               size="sm"
@@ -334,6 +404,146 @@ export function QuotationBuilderView({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols: Product Catalog Picker & Lines Table */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Customer Negotiation & Counter-Offers Review Panel */}
+          {(quotation.requests.length > 0 || quotation.stage === "NEGOTIATION") && (
+            <Card className="shadow-xs border-indigo-200 dark:border-indigo-900 bg-indigo-50/40 dark:bg-indigo-950/20">
+              <CardHeader className="p-4 pb-2 border-b border-indigo-100 dark:border-indigo-900/60 flex flex-row items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="h-7 w-7 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                    <MessageSquare className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-xs font-semibold text-foreground flex items-center gap-2">
+                      <span>Customer Counter-Offers & Negotiation</span>
+                      <Badge className="bg-indigo-600 hover:bg-indigo-600 text-white text-[10px] px-1.5 py-0 uppercase">
+                        {quotation.requests.some((r) => r.status === "OPEN") ? "Pending Rep Action" : "Revision History"}
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription className="text-[11px] text-muted-foreground">
+                      Customer reviewed this proposal in their portal and submitted counter-discount requests
+                    </CardDescription>
+                  </div>
+                </div>
+                {quotation.requestedDeliveryDate && (
+                  <Badge variant="outline" className="text-[10px] font-mono border-indigo-300">
+                    Customer Target Delivery: {quotation.requestedDeliveryDate}
+                  </Badge>
+                )}
+              </CardHeader>
+
+              <CardContent className="p-4 space-y-4">
+                {/* List of Customer Line Requests */}
+                <div className="space-y-2">
+                  {quotation.requests.map((req) => {
+                    const line = quotation.lines.find((l) => l.id === req.lineId);
+                    const prod = products[line?.productId ?? ""];
+                    return (
+                      <div
+                        key={req.id}
+                        className="p-3 rounded-lg border border-border bg-card text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-foreground">{prod?.name ?? "Line Item"}</span>
+                            <span className="text-muted-foreground font-mono">
+                              (Offered: {line?.discountPct ?? 0}% →{" "}
+                              <strong className="text-indigo-600 dark:text-indigo-400 font-bold">
+                                Requested: {req.requestedDiscountPct}%
+                              </strong>)
+                            </span>
+                            <Badge
+                              variant={req.status === "ACCEPTED" ? "secondary" : req.status === "DECLINED" ? "destructive" : "outline"}
+                              className="text-[9px] uppercase font-mono px-1.5 py-0"
+                            >
+                              {req.status}
+                            </Badge>
+                          </div>
+                          {req.note && (
+                            <p className="text-[11px] text-muted-foreground italic bg-muted/40 px-2 py-1 rounded">
+                              "{req.note}"
+                            </p>
+                          )}
+                          <div className="text-[10px] text-muted-foreground">
+                            Submitted: {new Date(req.at).toLocaleDateString()} at {new Date(req.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                        </div>
+
+                        {req.status === "OPEN" && (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRepRespond(req.id, false)}
+                              className="h-7 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                            >
+                              <X className="h-3.5 w-3.5 mr-1" />
+                              Decline
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => handleRepRespond(req.id, true)}
+                              className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                            >
+                              <Check className="h-3.5 w-3.5 mr-1" />
+                              Accept Counter-Offer
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Direct Account Discussion Thread with Customer */}
+                <div className="pt-2 border-t border-indigo-100 dark:border-indigo-900/60 space-y-2">
+                  <div className="text-xs font-semibold text-foreground flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <MessageSquare className="h-3.5 w-3.5 text-primary" />
+                      <span>Direct Customer Messages & Chat</span>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">
+                      Synchronized live with Customer Procurement Portal
+                    </span>
+                  </div>
+                  <div className="space-y-2 max-h-40 overflow-y-auto p-2.5 rounded-lg border border-border bg-background text-xs">
+                    {quotation.messages.map((m) => (
+                      <div
+                        key={m.id}
+                        className={`p-2 rounded-lg text-xs space-y-0.5 max-w-[85%] ${
+                          m.role !== "CUSTOMER"
+                            ? "ml-auto bg-primary text-primary-foreground"
+                            : "bg-muted text-foreground border border-border"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[10px] opacity-80 gap-3">
+                          <span className="font-semibold">{m.author} ({m.role})</span>
+                          <span>{new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                        </div>
+                        <p className="text-xs leading-relaxed">{m.body}</p>
+                      </div>
+                    ))}
+                    {quotation.messages.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-2">No messages exchanged yet.</p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder="Reply to customer procurement contact..."
+                      value={repChatInput}
+                      onChange={(e) => setRepChatInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleRepSendMessage()}
+                      className="text-xs h-8 bg-background"
+                    />
+                    <Button size="sm" onClick={handleRepSendMessage} className="h-8 text-xs bg-primary text-primary-foreground">
+                      <Send className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Add Products Section */}
           <Card className="shadow-xs">
             <CardHeader className="p-4 pb-2 border-b border-border flex flex-row items-center justify-between">
