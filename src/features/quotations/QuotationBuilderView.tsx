@@ -58,6 +58,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { canPerformAction } from "../../modules/identity/permissions";
 
 interface QuotationBuilderViewProps {
   quotationId?: string | undefined;
@@ -90,8 +91,16 @@ export function QuotationBuilderView({
     ? customers[quotation.customerId]
     : customers[selectedCustomerId];
 
+  const session = state.session;
+  const isSalesRep = session?.role === "SALES_REP";
+  const isCustomer = session?.role === "CUSTOMER";
+
   // If creating new quote
   const handleCreateDraft = async () => {
+    if (!canPerformAction(session?.role, "quotation.create")) {
+      toast.error("Your role is not authorized to create quotations.");
+      return;
+    }
     try {
       const q = await quotationActions.create(selectedCustomerId);
       setActiveQuoteId(q.id);
@@ -100,6 +109,32 @@ export function QuotationBuilderView({
       toast.error(err.message || "Failed to create quotation");
     }
   };
+
+  // Customer & Sales Rep access checks on existing quotation
+  if (quotation) {
+    if (isCustomer && quotation.customerId !== session?.customerId) {
+      return (
+        <div className="max-w-xl mx-auto py-10 space-y-4 text-center">
+          <h2 className="text-lg font-bold text-foreground">Access Restricted</h2>
+          <p className="text-xs text-muted-foreground">You are not authorized to view this customer quotation.</p>
+          <Button variant="outline" size="sm" onClick={onBack} className="text-xs">
+            <ArrowLeft className="h-3.5 w-3.5 mr-1.5" /> Back to Quotations
+          </Button>
+        </div>
+      );
+    }
+    if (isSalesRep && quotation.ownerId && session?.id && quotation.ownerId !== session?.id) {
+      return (
+        <div className="max-w-xl mx-auto py-10 space-y-4 text-center">
+          <h2 className="text-lg font-bold text-foreground">Access Restricted</h2>
+          <p className="text-xs text-muted-foreground">You can only access and edit quotations that you own.</p>
+          <Button variant="outline" size="sm" onClick={onBack} className="text-xs">
+            <ArrowLeft className="h-3.5 w-3.5 mr-1.5" /> Back to My Quotations
+          </Button>
+        </div>
+      );
+    }
+  }
 
   // If no quote active yet, show initialization card
   if (!quotation) {
@@ -159,6 +194,11 @@ export function QuotationBuilderView({
   const totals = totalsOf(state, quotation);
   const evaluation = evaluate(state, quotation);
   const recommendations = getRecommendations(quotation, products, state.governance?.upsellConfig);
+
+  const isOwner = !quotation.ownerId || quotation.ownerId === session?.id;
+  const canEdit = session?.role === "ADMIN" || session?.role === "SALES_MANAGER" || (isSalesRep && isOwner);
+  const canSubmit = canEdit && canPerformAction(session?.role, "quotation.submit");
+  const canConfirm = canEdit && canPerformAction(session?.role, "quotation.confirm");
 
   // Line operations
   const handleAddLine = async (prodId?: string) => {
@@ -350,7 +390,13 @@ export function QuotationBuilderView({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2 flex-wrap">
-          {quotation.stage === "DRAFT" && (
+          {!canEdit && (
+            <Badge variant="outline" className="text-[10px] text-muted-foreground mr-1">
+              Read-Only
+            </Badge>
+          )}
+
+          {quotation.stage === "DRAFT" && canEdit && (
             <Button
               size="sm"
               variant="outline"
@@ -362,7 +408,7 @@ export function QuotationBuilderView({
             </Button>
           )}
 
-          {["DRAFT", "APPROVED", "NEGOTIATION"].includes(quotation.stage) && (
+          {["DRAFT", "APPROVED", "NEGOTIATION"].includes(quotation.stage) && canSubmit && (
             <Button
               size="sm"
               variant="outline"
@@ -375,7 +421,7 @@ export function QuotationBuilderView({
             </Button>
           )}
 
-          {["DRAFT", "APPROVED"].includes(quotation.stage) && (
+          {["DRAFT", "APPROVED"].includes(quotation.stage) && canEdit && (
             <Button
               size="sm"
               variant="outline"
@@ -387,7 +433,7 @@ export function QuotationBuilderView({
             </Button>
           )}
 
-          {quotation.stage === "APPROVED" && (
+          {quotation.stage === "APPROVED" && canConfirm && (
             <Button
               size="sm"
               onClick={handleConfirmQuotation}

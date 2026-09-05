@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   useAppState,
   adminActions,
 } from "../../infrastructure/store";
 import type { CustomerTier, ProductCategory, Product, Warehouse, SubscriptionPlan } from "../../modules/shared/types";
+import { canAccessAdminTab } from "../../modules/identity/permissions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -62,8 +63,29 @@ import {
 import type { RecommendationRule } from "../../modules/recommendations/service";
 import { toast } from "sonner";
 
-export function AdminConfigView() {
+export interface AdminConfigViewProps {
+  initialTab?: "governance" | "catalog" | "warehouses" | "plans" | "upsell";
+}
+
+export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
   const state = useAppState();
+  const session = state.session;
+  const role = session?.role;
+
+  const defaultTab =
+    initialTab ||
+    (canAccessAdminTab(role, "governance")
+      ? "governance"
+      : canAccessAdminTab(role, "warehouses")
+        ? "warehouses"
+        : "governance");
+  const [activeTab, setActiveTab] = useState<string>(defaultTab);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Edit product modal state
   const [productModal, setProductModal] = useState<{
@@ -346,38 +368,59 @@ export function AdminConfigView() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Operational Administration & Governance</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">
+          {session?.role === "SALES_MANAGER" || initialTab === "governance"
+            ? "Commercial Policy & Discount Governance"
+            : session?.role === "FINANCE" || initialTab === "warehouses"
+              ? "Logistics & Multi-Depot Operations"
+              : "Operational Administration & Governance"}
+        </h1>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Configure discount thresholds, product catalogs, multi-depot shipping freight, and recurring billing models.
+          {session?.role === "SALES_MANAGER" || initialTab === "governance"
+            ? "Configure product category ceilings and customer tier risk thresholds."
+            : session?.role === "FINANCE" || initialTab === "warehouses"
+              ? "Manage warehouse depot networks, stock allocations, and shipping freight rules."
+              : "Configure discount thresholds, product catalogs, multi-depot shipping freight, and recurring billing models."}
         </p>
       </div>
 
-      <Tabs defaultValue="governance" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="bg-card border border-border h-9 p-0.5">
-          <TabsTrigger value="governance" className="text-xs flex items-center gap-1.5 h-8">
-            <ShieldAlert className="h-3.5 w-3.5" />
-            Discount Policy Rules
-          </TabsTrigger>
-          <TabsTrigger value="catalog" className="text-xs flex items-center gap-1.5 h-8">
-            <Package className="h-3.5 w-3.5" />
-            Product Catalog
-          </TabsTrigger>
-          <TabsTrigger value="warehouses" className="text-xs flex items-center gap-1.5 h-8">
-            <Building className="h-3.5 w-3.5" />
-            Warehouses & Logistics
-          </TabsTrigger>
-          <TabsTrigger value="plans" className="text-xs flex items-center gap-1.5 h-8">
-            <Repeat className="h-3.5 w-3.5" />
-            Subscription Plans
-          </TabsTrigger>
-          <TabsTrigger value="upsell" className="text-xs flex items-center gap-1.5 h-8">
-            <Sparkles className="h-3.5 w-3.5" />
-            Upsell & Cross-Sell
-          </TabsTrigger>
+          {canAccessAdminTab(role, "governance") && (
+            <TabsTrigger value="governance" className="text-xs flex items-center gap-1.5 h-8">
+              <ShieldAlert className="h-3.5 w-3.5" />
+              Discount Policy Rules
+            </TabsTrigger>
+          )}
+          {canAccessAdminTab(role, "catalog") && (
+            <TabsTrigger value="catalog" className="text-xs flex items-center gap-1.5 h-8">
+              <Package className="h-3.5 w-3.5" />
+              Product Catalog
+            </TabsTrigger>
+          )}
+          {canAccessAdminTab(role, "warehouses") && (
+            <TabsTrigger value="warehouses" className="text-xs flex items-center gap-1.5 h-8">
+              <Building className="h-3.5 w-3.5" />
+              Warehouses & Logistics
+            </TabsTrigger>
+          )}
+          {canAccessAdminTab(role, "plans") && (
+            <TabsTrigger value="plans" className="text-xs flex items-center gap-1.5 h-8">
+              <Repeat className="h-3.5 w-3.5" />
+              Subscription Plans
+            </TabsTrigger>
+          )}
+          {canAccessAdminTab(role, "upsell") && (
+            <TabsTrigger value="upsell" className="text-xs flex items-center gap-1.5 h-8">
+              <Sparkles className="h-3.5 w-3.5" />
+              Upsell & Cross-Sell
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Tab 1: Discount Governance Rules */}
-        <TabsContent value="governance" className="space-y-6">
+        {canAccessAdminTab(role, "governance") && (
+          <TabsContent value="governance" className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Category Ceilings */}
             <Card className="shadow-xs">
@@ -464,9 +507,11 @@ export function AdminConfigView() {
             </Card>
           </div>
         </TabsContent>
+        )}
 
         {/* Tab 2: Product Catalog */}
-        <TabsContent value="catalog" className="space-y-4">
+        {canAccessAdminTab(role, "catalog") && (
+          <TabsContent value="catalog" className="space-y-4">
           <Card className="shadow-xs">
             <CardHeader className="p-4 pb-2 border-b border-border flex flex-row items-center justify-between">
               <div>
@@ -556,9 +601,11 @@ export function AdminConfigView() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
         {/* Tab 3: Warehouses & Logistics */}
-        <TabsContent value="warehouses" className="space-y-6">
+        {canAccessAdminTab(role, "warehouses") && (
+          <TabsContent value="warehouses" className="space-y-6">
           {/* Section 1: Depot Facilities & Freight Rates */}
           <Card className="shadow-xs">
             <CardHeader className="p-4 border-b border-border">
@@ -929,9 +976,11 @@ export function AdminConfigView() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
         {/* Tab 4: Recurring Plans & Billing Governance */}
-        <TabsContent value="plans" className="space-y-6">
+        {canAccessAdminTab(role, "plans") && (
+          <TabsContent value="plans" className="space-y-6">
           <Card className="shadow-xs">
             <CardHeader className="p-4 border-b border-border">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1112,9 +1161,11 @@ export function AdminConfigView() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
         {/* Tab 5: Upsell & Cross-Sell Rules (A6) */}
-        <TabsContent value="upsell" className="space-y-6">
+        {canAccessAdminTab(role, "upsell") && (
+          <TabsContent value="upsell" className="space-y-6">
           {/* Section A: Minimum Margin Cutoff */}
           <Card className="shadow-xs border-border">
             <CardHeader className="p-4 border-b border-border">
@@ -1369,6 +1420,7 @@ export function AdminConfigView() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
       </Tabs>
 
       {/* Edit Product Modal */}

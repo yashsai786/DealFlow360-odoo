@@ -4,8 +4,14 @@ import { apiSuccess, apiError } from "@/lib/api/contracts/schemas";
 import { calculateProration } from "@/modules/billing/service";
 import type { Subscription, SubscriptionPlan, BillingAdjustment } from "@/modules/shared/types";
 
+import { resolveActor } from "@/application/resolveActor";
+import { requirePermission } from "@/application/authorizationGuard";
+
 export async function POST(req: Request) {
   try {
+    const actor = await resolveActor(req);
+    requirePermission(actor, "billing.manage");
+
     const body = await req.json();
     const { subscriptionId, newQty, apply } = body;
 
@@ -72,6 +78,7 @@ export async function POST(req: Request) {
       subscription: updatedSub,
     });
   } catch (err: any) {
-    return apiError("PRORATION_CALCULATION_ERROR", err?.message || "Failed to calculate proration", 500);
+    const status = err?.statusCode || (err?.message?.includes("Access denied") ? 403 : 500);
+    return apiError("PRORATION_CALCULATION_ERROR", err?.message || "Failed to calculate proration", status);
   }
 }

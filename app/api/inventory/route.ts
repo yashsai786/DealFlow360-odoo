@@ -1,5 +1,7 @@
 import { inventoryRepository } from "@/infrastructure/repositories/prismaRepositories";
 import { apiSuccess, apiError } from "@/lib/api/contracts/schemas";
+import { resolveActor } from "@/application/resolveActor";
+import { requirePermission } from "@/application/authorizationGuard";
 
 export async function GET() {
   try {
@@ -12,6 +14,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const actor = await resolveActor(req);
+    requirePermission(actor, "inventory.manage");
+
     const body = await req.json();
     if (!body.warehouseId || !body.productId) {
       return apiError("VALIDATION_ERROR", "warehouseId and productId are required", 400);
@@ -25,6 +30,7 @@ export async function POST(req: Request) {
     });
     return apiSuccess(updated);
   } catch (err: any) {
-    return apiError("INVENTORY_UPDATE_ERROR", err?.message || "Failed to update inventory", 500);
+    const status = err?.statusCode || (err?.message?.includes("Access denied") ? 403 : 500);
+    return apiError("INVENTORY_UPDATE_ERROR", err?.message || "Failed to update inventory", status);
   }
 }

@@ -42,10 +42,13 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import { canPerformAction } from "../../modules/identity/permissions";
 
 export function InvoicesView() {
   const state = useAppState();
   const customers = customerMap(state);
+  const session = state.session;
+  const canRecordPayment = canPerformAction(session?.role, "invoice.payment");
 
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>(
     state.invoices[0]?.id ?? "",
@@ -193,20 +196,26 @@ export function InvoicesView() {
                   </div>
 
                   {invoiceDue > 0 && (
-                    <Button
-                      size="sm"
-                      onClick={() =>
-                        setPaymentModal({
-                          open: true,
-                          amount: invoiceDue.toString(),
-                          method: "Wire Transfer",
-                        })
-                      }
-                      className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                    >
-                      <IndianRupee className="h-3.5 w-3.5 mr-1" />
-                      Record Payment
-                    </Button>
+                    canRecordPayment ? (
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          setPaymentModal({
+                            open: true,
+                            amount: invoiceDue.toString(),
+                            method: "Wire Transfer",
+                          })
+                        }
+                        className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                      >
+                        <IndianRupee className="h-3.5 w-3.5 mr-1" />
+                        Record Payment
+                      </Button>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        Read-Only Financials
+                      </Badge>
+                    )
                   )}
                 </CardHeader>
                 <CardContent className="p-4 space-y-6">

@@ -79,9 +79,13 @@ export class ApprovalApplicationService {
       throw new Error("This approval workflow has already been completed.");
     }
 
+    if (actor.role === "SALES_REP") {
+      throw new Error("Access denied: You do not have permission to authorize commercial approval terms.");
+    }
+
     const step = approval.steps[stepIndex]!;
     if (actor.role !== "ADMIN" && step.role !== actor.role) {
-      throw new Error(`This step is waiting on ${step.role.replace("_", " ")}.`);
+      throw new Error(`Access denied: This step is waiting on ${step.role.replace("_", " ")}.`);
     }
 
     const steps: ApprovalStep[] = approval.steps.map((s, idx) => {

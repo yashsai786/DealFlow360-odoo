@@ -69,7 +69,7 @@ export interface IGovernanceRepository {
 }
 
 export interface IQuotationRepository {
-  list(filter?: { customerId?: string; stage?: string; search?: string }): Promise<Quotation[]>;
+  list(filter?: { customerId?: string; ownerId?: string; stage?: string; search?: string }): Promise<Quotation[]>;
   findById(id: string): Promise<Quotation | null>;
   findByNumber(number: string): Promise<Quotation | null>;
   create(quotation: Quotation): Promise<Quotation>;

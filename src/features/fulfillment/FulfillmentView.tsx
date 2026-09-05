@@ -40,11 +40,14 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
+import { canPerformAction } from "../../modules/identity/permissions";
 
 export function FulfillmentView() {
   const state = useAppState();
   const products = productMap(state);
   const customers = customerMap(state);
+  const session = state.session;
+  const canManageFulfillment = canPerformAction(session?.role, "fulfillment.manage");
 
   const [selectedOrderId, setSelectedOrderId] = useState<string>(
     state.orders[0]?.id ?? "",
@@ -243,15 +246,21 @@ export function FulfillmentView() {
 
                 <div className="flex items-center gap-2">
                   {order.status !== "SHIPPED" && (
-                    <Button
-                      size="sm"
-                      onClick={handleShip}
-                      disabled={order.allocations.length === 0}
-                      className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
-                    >
-                      <Truck className="h-3.5 w-3.5 mr-1" />
-                      Ship Order
-                    </Button>
+                    canManageFulfillment ? (
+                      <Button
+                        size="sm"
+                        onClick={handleShip}
+                        disabled={order.allocations.length === 0}
+                        className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                      >
+                        <Truck className="h-3.5 w-3.5 mr-1" />
+                        Ship Order
+                      </Button>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        Read-Only Logistics
+                      </Badge>
+                    )
                   )}
                 </div>
               </CardHeader>
@@ -299,14 +308,16 @@ export function FulfillmentView() {
                                 Available free depot inventory: <strong className="text-emerald-600 font-mono">{freeStock} units</strong>
                               </div>
                             </div>
-                            <Button
-                              size="sm"
-                              onClick={() => handleConsolidate(bo.id)}
-                              className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-xs"
-                            >
-                              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                              Consolidate Remaining Backorder
-                            </Button>
+                            {canManageFulfillment && (
+                              <Button
+                                size="sm"
+                                onClick={() => handleConsolidate(bo.id)}
+                                className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-xs"
+                              >
+                                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                                Consolidate Remaining Backorder
+                              </Button>
+                            )}
                           </div>
                         );
                       })}
@@ -373,23 +384,31 @@ export function FulfillmentView() {
 
                     {/* B6 Action Buttons: Accept Suggested Split & Manual Override side-by-side */}
                     <div className="flex items-center justify-end gap-2 pt-2 border-t border-primary/20">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleOpenOverride}
-                        className="h-8 text-xs bg-background hover:bg-muted"
-                      >
-                        <Sliders className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
-                        Manual Override
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={handleAcceptSplit}
-                        className="h-8 text-xs bg-primary text-primary-foreground font-semibold shadow-xs"
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
-                        Accept Suggested Split
-                      </Button>
+                      {canManageFulfillment ? (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleOpenOverride}
+                            className="h-8 text-xs bg-background hover:bg-muted"
+                          >
+                            <Sliders className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
+                            Manual Override
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={handleAcceptSplit}
+                            className="h-8 text-xs bg-primary text-primary-foreground font-semibold shadow-xs"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+                            Accept Suggested Split
+                          </Button>
+                        </>
+                      ) : (
+                        <div className="text-[11px] text-muted-foreground italic">
+                          Warehouse split automatically recommended. Allocation dispatch restricted to Logistics/Admin.
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -476,28 +495,30 @@ export function FulfillmentView() {
                                 (Required: {bo.qty})
                               </p>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleReplenish("wh-main", bo.productId, bo.qty)}
-                                className="h-7 text-[11px] border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300"
-                              >
-                                <PlusCircle className="h-3 w-3 mr-1 text-emerald-600" />
-                                Simulate +{bo.qty} Inbound
-                              </Button>
-                              <Button
-                                size="sm"
-                                disabled={!canCons}
-                                onClick={() => handleConsolidate(bo.id)}
-                                className={`h-7 text-[11px] ${
-                                  canCons ? "bg-emerald-600 hover:bg-emerald-700 text-white font-semibold" : ""
-                                }`}
-                              >
-                                <RefreshCw className="h-3 w-3 mr-1" />
-                                Consolidate Backorder
-                              </Button>
-                            </div>
+                            {canManageFulfillment && (
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleReplenish("wh-main", bo.productId, bo.qty)}
+                                  className="h-7 text-[11px] border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300"
+                                >
+                                  <PlusCircle className="h-3 w-3 mr-1 text-emerald-600" />
+                                  Simulate +{bo.qty} Inbound
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  disabled={!canCons}
+                                  onClick={() => handleConsolidate(bo.id)}
+                                  className={`h-7 text-[11px] ${
+                                    canCons ? "bg-emerald-600 hover:bg-emerald-700 text-white font-semibold" : ""
+                                  }`}
+                                >
+                                  <RefreshCw className="h-3 w-3 mr-1" />
+                                  Consolidate Backorder
+                                </Button>
+                              </div>
+                            )}
                           </div>
                         );
                       })}

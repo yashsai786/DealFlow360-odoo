@@ -1,4 +1,5 @@
 import type { Role } from "../shared/types";
+export * from "./permissions";
 
 export type Permission =
   | "quotation.create"

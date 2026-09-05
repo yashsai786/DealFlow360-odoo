@@ -4,8 +4,14 @@ import { apiSuccess, apiError } from "@/lib/api/contracts/schemas";
 import { calculateWarehouseSplit } from "@/modules/fulfillment/service";
 import type { Product, Warehouse, InventoryItem, Quotation } from "@/modules/shared/types";
 
+import { resolveActor } from "@/application/resolveActor";
+import { requirePermission } from "@/application/authorizationGuard";
+
 export async function POST(req: Request) {
   try {
+    const actor = await resolveActor(req);
+    requirePermission(actor, "fulfillment.manage");
+
     const body = await req.json();
     let quotation: Quotation | null = body.quotation || null;
 
@@ -70,6 +76,7 @@ export async function POST(req: Request) {
       }),
     });
   } catch (err: any) {
-    return apiError("SPLIT_CALCULATION_ERROR", err?.message || "Failed to calculate warehouse split", 500);
+    const status = err?.statusCode || (err?.message?.includes("Access denied") ? 403 : 500);
+    return apiError("SPLIT_CALCULATION_ERROR", err?.message || "Failed to calculate warehouse split", status);
   }
 }

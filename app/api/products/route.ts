@@ -1,6 +1,8 @@
 import { productRepository } from "@/infrastructure/repositories/prismaRepositories";
 import { CreateProductSchema, UpdateProductSchema } from "@/lib/api/contracts/schemas";
 import { apiSuccess, apiError } from "@/lib/api/contracts/schemas";
+import { resolveActor } from "@/application/resolveActor";
+import { requirePermission } from "@/application/authorizationGuard";
 
 export async function GET() {
   try {
@@ -13,6 +15,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const actor = await resolveActor(req);
+    requirePermission(actor, "product.create");
+
     const body = await req.json();
 
     // Upsert: if `id` is present it's an edit, otherwise it's a create
@@ -28,6 +33,7 @@ export async function POST(req: Request) {
     const product = await productRepository.upsert({ id, ...parsed.data } as any);
     return apiSuccess(product, isNew ? 201 : 200);
   } catch (err: any) {
-    return apiError("PRODUCT_SAVE_ERROR", err?.message || "Failed to save product", 500);
+    const status = err?.statusCode || (err?.message?.includes("Access denied") ? 403 : 500);
+    return apiError("PRODUCT_SAVE_ERROR", err?.message || "Failed to save product", status);
   }
 }

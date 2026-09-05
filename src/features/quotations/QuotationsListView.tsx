@@ -7,6 +7,7 @@ import {
 } from "../../infrastructure/store";
 import { stageLabel } from "../../modules/quotations/service";
 import type { Quotation, QuotationStage } from "../../modules/shared/types";
+import { canPerformAction } from "../../modules/identity/permissions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -135,7 +136,17 @@ export function QuotationsListView({
     }
   };
 
-  const filteredQuotes = state.quotations.filter((q) => {
+  const session = state.session;
+  const isSalesRep = session?.role === "SALES_REP";
+  const isCustomer = session?.role === "CUSTOMER";
+
+  const baseQuotes = state.quotations.filter((q) => {
+    if (isCustomer) return q.customerId === session?.customerId;
+    if (isSalesRep) return q.ownerId === session?.id;
+    return true;
+  });
+
+  const filteredQuotes = baseQuotes.filter((q) => {
     const cust = customers[q.customerId];
     const matchesSearch =
       q.number.toLowerCase().includes(search.toLowerCase()) ||
@@ -183,10 +194,12 @@ export function QuotationsListView({
             </Button>
           </div>
 
-          <Button size="sm" onClick={onCreateNew} className="h-8 text-xs font-medium">
-            <Plus className="h-3.5 w-3.5 mr-1.5" />
-            Create Quotation
-          </Button>
+          {canPerformAction(session?.role, "quotation.create") && (
+            <Button size="sm" onClick={onCreateNew} className="h-8 text-xs font-medium">
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              Create Quotation
+            </Button>
+          )}
         </div>
       </div>
 

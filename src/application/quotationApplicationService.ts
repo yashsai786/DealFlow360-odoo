@@ -24,6 +24,11 @@ import type {
 import { assertCan } from "../modules/identity/service";
 import { canTransition, calculateTotals, round } from "../modules/quotations/service";
 import { calculateBlendedRisk } from "../modules/discount-governance/service";
+import {
+  requirePermission,
+  enforceQuotationOwnership,
+  enforceCustomerIsolation,
+} from "./authorizationGuard";
 
 const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
 const now = () => new Date().toISOString();
@@ -33,12 +38,16 @@ export class QuotationApplicationService {
     actor: User,
     filters?: { customerId?: string; stage?: string; search?: string }
   ): Promise<Quotation[]> {
-    const effectiveFilters = { ...filters };
+    const effectiveFilters: { customerId?: string; ownerId?: string; stage?: string; search?: string } = {
+      ...filters,
+    };
 
-    // Enforce strict customer data isolation
+    // Enforce strict customer data isolation & sales rep assignment isolation
     if (actor.role === "CUSTOMER") {
       if (!actor.customerId) return [];
       effectiveFilters.customerId = actor.customerId;
+    } else if (actor.role === "SALES_REP") {
+      effectiveFilters.ownerId = actor.id;
     }
 
     return await quotationRepository.list(effectiveFilters);
@@ -50,16 +59,14 @@ export class QuotationApplicationService {
       throw new Error(`Quotation '${id}' not found`);
     }
 
-    // Customer data isolation check
-    if (actor.role === "CUSTOMER" && quotation.customerId !== actor.customerId) {
-      throw new Error("Access denied: You do not have permission to view this quotation.");
-    }
+    // Strict customer and ownership validation
+    enforceQuotationOwnership(actor, quotation, false);
 
     return quotation;
   }
 
   async create(customerId: string, actor: User): Promise<Quotation> {
-    assertCan(actor.role, "quotation.create");
+    requirePermission(actor, "quotation.create");
 
     // Check if customer exists
     const customer = await customerRepository.findById(customerId);
@@ -105,6 +112,7 @@ export class QuotationApplicationService {
 
   async update(id: string, patch: Partial<Quotation>, actor: User): Promise<Quotation> {
     const quotation = await this.getById(id, actor);
+    enforceQuotationOwnership(actor, quotation, true);
 
     // If stage transition is attempted, validate state machine
     if (patch.stage && patch.stage !== quotation.stage) {
@@ -122,8 +130,8 @@ export class QuotationApplicationService {
     lineInput: { productId: string; qty: number; unitPrice?: number; discountPct?: number },
     actor: User
   ): Promise<Quotation> {
-    assertCan(actor.role, "quotation.edit");
     const quotation = await this.getById(id, actor);
+    enforceQuotationOwnership(actor, quotation, true);
 
     // Fetch product details
     const products = await productRepository.list();
@@ -172,8 +180,8 @@ export class QuotationApplicationService {
     patch: { qty?: number; unitPrice?: number; discountPct?: number },
     actor: User
   ): Promise<Quotation> {
-    assertCan(actor.role, "quotation.edit");
     const quotation = await this.getById(id, actor);
+    enforceQuotationOwnership(actor, quotation, true);
 
     const lineExists = quotation.lines.some((l) => l.id === lineId);
     if (!lineExists) {
@@ -209,8 +217,8 @@ export class QuotationApplicationService {
   }
 
   async removeLine(id: string, lineId: string, actor: User): Promise<Quotation> {
-    assertCan(actor.role, "quotation.edit");
     const quotation = await this.getById(id, actor);
+    enforceQuotationOwnership(actor, quotation, true);
 
     const updatedLines = quotation.lines.filter((l) => l.id !== lineId);
     const updated = await quotationRepository.update(id, { lines: updatedLines });
@@ -236,8 +244,9 @@ export class QuotationApplicationService {
     evaluation: DiscountEvaluation;
     approval?: Approval;
   }> {
-    assertCan(actor.role, "quotation.submit");
+    requirePermission(actor, "quotation.submit");
     const quotation = await this.getById(id, actor);
+    enforceQuotationOwnership(actor, quotation, true);
 
     if (quotation.lines.length === 0) {
       throw new Error("Add at least one product line before submitting.");
@@ -407,15 +416,12 @@ export class QuotationApplicationService {
   }
 
   async delete(id: string, actor: User): Promise<{ id: string; deleted: boolean }> {
-    assertCan(actor.role, "quotation.edit");
     const quotation = await quotationRepository.findById(id);
     if (!quotation) {
       throw new Error(`Quotation '${id}' not found`);
     }
 
-    if (actor.role === "CUSTOMER" && quotation.customerId !== actor.customerId) {
-      throw new Error("Access denied: You do not have permission to delete this quotation.");
-    }
+    enforceQuotationOwnership(actor, quotation, true);
 
     if (quotation.stage !== "DRAFT") {
       throw new Error(

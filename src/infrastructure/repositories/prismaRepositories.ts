@@ -568,10 +568,13 @@ export class PrismaQuotationRepository implements IQuotationRepository {
     };
   }
 
-  async list(filter?: { customerId?: string; stage?: string; search?: string }): Promise<Quotation[]> {
+  async list(filter?: { customerId?: string; ownerId?: string; stage?: string; search?: string }): Promise<Quotation[]> {
     const where: any = {};
     if (filter?.customerId) {
       where.customerId = filter.customerId;
+    }
+    if (filter?.ownerId) {
+      where.ownerId = filter.ownerId;
     }
     if (filter?.stage && filter.stage !== "all") {
       where.stage = filter.stage;

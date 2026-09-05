@@ -17,7 +17,8 @@ export async function GET(req: Request) {
     });
     return apiSuccess(quotations);
   } catch (err: any) {
-    return apiError("QUOTATIONS_FETCH_ERROR", err?.message || "Failed to fetch quotations", 500);
+    const status = err?.statusCode || (err?.message?.includes("Access denied") ? 403 : 500);
+    return apiError("QUOTATIONS_FETCH_ERROR", err?.message || "Failed to fetch quotations", status);
   }
 }
 
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
     const quotation = await quotationApplicationService.create(parsed.data.customerId, actor);
     return apiSuccess(quotation, 201);
   } catch (err: any) {
-    const status = err?.message?.includes("Access denied") ? 403 : 500;
+    const status = err?.statusCode || (err?.message?.includes("Access denied") ? 403 : 500);
     return apiError("QUOTATION_CREATE_ERROR", err?.message || "Failed to create quotation", status);
   }
 }

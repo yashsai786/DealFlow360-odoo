@@ -43,10 +43,13 @@ import {
   CreditCard,
 } from "lucide-react";
 import { toast } from "sonner";
+import { canPerformAction } from "../../modules/identity/permissions";
 
 export function SubscriptionsView() {
   const state = useAppState();
   const customers = customerMap(state);
+  const session = state.session;
+  const canManageBilling = canPerformAction(session?.role, "billing.manage");
 
   const [selectedSubId, setSelectedSubId] = useState<string>(
     state.subscriptions[0]?.id ?? "",
@@ -297,49 +300,57 @@ export function SubscriptionsView() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {selectedSub.status === "ACTIVE" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSetStatus("PAUSED")}
-                        className="h-8 text-xs gap-1.5"
-                      >
-                        <PauseCircle className="h-3.5 w-3.5 text-amber-600" />
-                        <span>Pause</span>
-                      </Button>
-                    )}
-                    {selectedSub.status === "PAUSED" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSetStatus("ACTIVE")}
-                        className="h-8 text-xs gap-1.5"
-                      >
-                        <PlayCircle className="h-3.5 w-3.5 text-emerald-600" />
-                        <span>Resume</span>
-                      </Button>
-                    )}
-                    {selectedSub.status === "CANCELLED" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSetStatus("ACTIVE")}
-                        className="h-8 text-xs gap-1.5 text-emerald-600 border-emerald-300 hover:bg-emerald-50"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span>Reactivate Contract</span>
-                      </Button>
-                    )}
-                    {selectedSub.status !== "CANCELLED" && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowCancelModal(!showCancelModal)}
-                        className="h-8 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20 gap-1.5"
-                      >
-                        <XCircle className="h-3.5 w-3.5" />
-                        <span>Cancel Subscription</span>
-                      </Button>
+                    {canManageBilling ? (
+                      <>
+                        {selectedSub.status === "ACTIVE" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSetStatus("PAUSED")}
+                            className="h-8 text-xs gap-1.5"
+                          >
+                            <PauseCircle className="h-3.5 w-3.5 text-amber-600" />
+                            <span>Pause</span>
+                          </Button>
+                        )}
+                        {selectedSub.status === "PAUSED" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSetStatus("ACTIVE")}
+                            className="h-8 text-xs gap-1.5"
+                          >
+                            <PlayCircle className="h-3.5 w-3.5 text-emerald-600" />
+                            <span>Resume</span>
+                          </Button>
+                        )}
+                        {selectedSub.status === "CANCELLED" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSetStatus("ACTIVE")}
+                            className="h-8 text-xs gap-1.5 text-emerald-600 border-emerald-300 hover:bg-emerald-50"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            <span>Reactivate Contract</span>
+                          </Button>
+                        )}
+                        {selectedSub.status !== "CANCELLED" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowCancelModal(!showCancelModal)}
+                            className="h-8 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20 gap-1.5"
+                          >
+                            <XCircle className="h-3.5 w-3.5" />
+                            <span>Cancel Subscription</span>
+                          </Button>
+                        )}
+                      </>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        Read-Only Contract
+                      </Badge>
                     )}
                   </div>
                 </CardHeader>
@@ -690,15 +701,21 @@ export function SubscriptionsView() {
                         </span>
                       </div>
 
-                      <Button
-                        size="sm"
-                        disabled={newSeatCount === selectedSub.qty || selectedSub.status === "CANCELLED"}
-                        onClick={handleModifySeats}
-                        className="h-8 text-xs gap-1.5"
-                      >
-                        <TrendingUp className="h-3.5 w-3.5" />
-                        <span>Apply Modification</span>
-                      </Button>
+                      {canManageBilling ? (
+                        <Button
+                          size="sm"
+                          disabled={newSeatCount === selectedSub.qty || selectedSub.status === "CANCELLED"}
+                          onClick={handleModifySeats}
+                          className="h-8 text-xs gap-1.5"
+                        >
+                          <TrendingUp className="h-3.5 w-3.5" />
+                          <span>Apply Modification</span>
+                        </Button>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                          Modification Restricted
+                        </Badge>
+                      )}
                     </div>
 
                     {/* Live Proration Math Breakdown */}

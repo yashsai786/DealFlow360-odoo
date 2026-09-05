@@ -39,6 +39,7 @@ import {
   MessageSquareQuote,
 } from "lucide-react";
 import { toast } from "sonner";
+import { canPerformAction } from "../../modules/identity/permissions";
 
 interface ApprovalsViewProps {
   onOpenQuote: (quoteId: string) => void;
@@ -50,8 +51,15 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
   const customers = customerMap(state);
   const session = state.session;
 
+  const isSalesRep = session?.role === "SALES_REP";
+  const visibleApprovals = state.approvals.filter((a) => {
+    if (!isSalesRep) return true;
+    const q = state.quotations.find((quote) => quote.id === a.quotationId);
+    return q?.ownerId === session?.id;
+  });
+
   const [selectedApprovalId, setSelectedApprovalId] = useState<string>(
-    state.approvals.find((a) => a.status === "PENDING")?.id ?? state.approvals[0]?.id ?? "",
+    visibleApprovals.find((a) => a.status === "PENDING")?.id ?? visibleApprovals[0]?.id ?? "",
   );
 
   // Dialog for Return / Reject reason
@@ -65,14 +73,14 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
     reason: "",
   });
 
-  const selectedApproval = state.approvals.find((a) => a.id === selectedApprovalId);
+  const selectedApproval = visibleApprovals.find((a) => a.id === selectedApprovalId);
   const quotation = state.quotations.find((q) => q.id === selectedApproval?.quotationId);
   const customer = quotation ? customers[quotation.customerId] : null;
   const totals = quotation ? totalsOf(state, quotation) : null;
   const evaluation = quotation ? evaluate(state, quotation) : null;
 
-  const pendingApprovals = state.approvals.filter((a) => a.status === "PENDING");
-  const pastApprovals = state.approvals.filter((a) => a.status !== "PENDING");
+  const pendingApprovals = visibleApprovals.filter((a) => a.status === "PENDING");
+  const pastApprovals = visibleApprovals.filter((a) => a.status !== "PENDING");
 
   const handleApprove = async () => {
     if (!selectedApproval) return;
@@ -460,43 +468,51 @@ export function ApprovalsView({ onOpenQuote }: ApprovalsViewProps) {
 
                 {/* Managerial Decision Actions */}
                 {selectedApproval.status === "PENDING" && (
-                  <CardFooter className="p-4 border-t border-border bg-muted/20 flex items-center justify-between">
-                    <div className="text-xs text-muted-foreground">
-                      Signing as: <strong className="text-foreground">{session?.name}</strong> ({session?.role.replace("_", " ")})
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          setDecisionModal({ open: true, type: "RETURNED", reason: "" })
-                        }
-                        className="h-8 text-xs"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5 mr-1 text-amber-500" />
-                        Return for Revision
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() =>
-                          setDecisionModal({ open: true, type: "REJECTED", reason: "" })
-                        }
-                        className="h-8 text-xs"
-                      >
-                        <XCircle className="h-3.5 w-3.5 mr-1" />
-                        Reject Quotation
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={handleApprove}
-                        className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                        Approve Commercial Terms
-                      </Button>
-                    </div>
-                  </CardFooter>
+                  (canPerformAction(session?.role, "approval.decide_manager") || canPerformAction(session?.role, "approval.decide_finance")) ? (
+                    <CardFooter className="p-4 border-t border-border bg-muted/20 flex items-center justify-between">
+                      <div className="text-xs text-muted-foreground">
+                        Signing as: <strong className="text-foreground">{session?.name}</strong> ({session?.role.replace("_", " ")})
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setDecisionModal({ open: true, type: "RETURNED", reason: "" })
+                          }
+                          className="h-8 text-xs"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5 mr-1 text-amber-500" />
+                          Return for Revision
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() =>
+                            setDecisionModal({ open: true, type: "REJECTED", reason: "" })
+                          }
+                          className="h-8 text-xs"
+                        >
+                          <XCircle className="h-3.5 w-3.5 mr-1" />
+                          Reject Quotation
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleApprove}
+                          className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                          Approve Commercial Terms
+                        </Button>
+                      </div>
+                    </CardFooter>
+                  ) : (
+                    <CardFooter className="p-4 border-t border-border bg-muted/10 flex items-center justify-between">
+                      <div className="text-xs text-muted-foreground">
+                        Status: <strong className="text-amber-600">Pending Review</strong> · Viewing in read-only status mode as {session?.name} ({session?.role.replace("_", " ")})
+                      </div>
+                    </CardFooter>
+                  )
                 )}
               </Card>
             </>

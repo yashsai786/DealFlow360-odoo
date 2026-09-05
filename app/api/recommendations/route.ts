@@ -18,8 +18,14 @@ export async function GET() {
   }
 }
 
+import { resolveActor } from "@/application/resolveActor";
+import { requirePermission } from "@/application/authorizationGuard";
+
 export async function PUT(req: Request) {
   try {
+    const actor = await resolveActor(req);
+    requirePermission(actor, "upsell.manage");
+
     const body = await req.json();
     currentConfig = {
       ...currentConfig,
@@ -27,7 +33,8 @@ export async function PUT(req: Request) {
     };
     return apiSuccess(currentConfig);
   } catch (err: any) {
-    return apiError("RECOMMENDATIONS_CONFIG_UPDATE_ERROR", err?.message || "Failed to update upsell config", 500);
+    const status = err?.statusCode || (err?.message?.includes("Access denied") ? 403 : 500);
+    return apiError("RECOMMENDATIONS_CONFIG_UPDATE_ERROR", err?.message || "Failed to update upsell config", status);
   }
 }
 

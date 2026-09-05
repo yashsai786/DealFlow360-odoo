@@ -3,9 +3,14 @@ import { prisma } from "@/infrastructure/db";
 import { apiSuccess, apiError } from "@/lib/api/contracts/schemas";
 import { canConsolidate } from "@/modules/fulfillment/service";
 import type { InventoryItem } from "@/modules/shared/types";
+import { resolveActor } from "@/application/resolveActor";
+import { requirePermission } from "@/application/authorizationGuard";
 
 export async function POST(req: Request) {
   try {
+    const actor = await resolveActor(req);
+    requirePermission(actor, "fulfillment.manage");
+
     const body = await req.json();
     const { orderId, arrivalWarehouseId, arrivalProductId, arrivalQty } = body;
 
@@ -64,6 +69,7 @@ export async function POST(req: Request) {
       consolidatableBackorders,
     });
   } catch (err: any) {
-    return apiError("CONSOLIDATION_CHECK_ERROR", err?.message || "Failed to check backorder consolidation", 500);
+    const status = err?.statusCode || (err?.message?.includes("Access denied") ? 403 : 500);
+    return apiError("CONSOLIDATION_CHECK_ERROR", err?.message || "Failed to check backorder consolidation", status);
   }
 }

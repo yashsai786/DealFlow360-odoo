@@ -51,20 +51,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-export type NavTab =
-  | "dashboard"
-  | "quotations"
-  | "pipeline"
-  | "quotation-builder"
-  | "approvals"
-  | "fulfillment"
-  | "subscriptions"
-  | "invoices"
-  | "deal-health"
-  | "reports"
-  | "admin"
-  | "portal"
-  | "profile";
+import { type NavTab, canAccessPage } from "../../modules/identity/permissions";
+export type { NavTab };
 
 interface AppShellProps {
   currentTab: NavTab;
@@ -151,24 +139,28 @@ export function AppShell({
           {/* Top Menu: Sales Workspace Navigation */}
           {!isCustomer && (
             <div className="hidden lg:flex items-center gap-1 ml-4 pl-4 border-l border-border">
-              <Button
-                variant={currentTab === "quotations" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-8 text-xs font-medium"
-                onClick={() => onSelectTab("quotations")}
-              >
-                <FileText className="h-3.5 w-3.5 mr-1.5 text-primary" />
-                Quotations
-              </Button>
-              <Button
-                variant={currentTab === "pipeline" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-8 text-xs font-medium"
-                onClick={() => onSelectTab("pipeline")}
-              >
-                <Kanban className="h-3.5 w-3.5 mr-1.5 text-primary" />
-                Pipeline
-              </Button>
+              {canAccessPage(session?.role, "quotations") && (
+                <Button
+                  variant={currentTab === "quotations" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 text-xs font-medium"
+                  onClick={() => onSelectTab("quotations")}
+                >
+                  <FileText className="h-3.5 w-3.5 mr-1.5 text-primary" />
+                  Quotations
+                </Button>
+              )}
+              {canAccessPage(session?.role, "pipeline") && (
+                <Button
+                  variant={currentTab === "pipeline" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 text-xs font-medium"
+                  onClick={() => onSelectTab("pipeline")}
+                >
+                  <Kanban className="h-3.5 w-3.5 mr-1.5 text-primary" />
+                  Pipeline
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -196,16 +188,18 @@ export function AppShell({
                 <span>Reload Data</span>
               </Button>
 
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs items-center gap-1.5 hidden md:flex"
-                onClick={() => onSelectTab("admin")}
-                title="Opens the configuration and settings screen"
-              >
-                <Settings className="h-3.5 w-3.5 text-muted-foreground" />
-                <span>Go to Back-end</span>
-              </Button>
+              {session?.role === "ADMIN" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs items-center gap-1.5 hidden md:flex"
+                  onClick={() => onSelectTab("admin")}
+                  title="Opens the configuration and settings screen"
+                >
+                  <Settings className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>Go to Back-end</span>
+                </Button>
+              )}
 
               <Button
                 variant="ghost"
@@ -492,98 +486,150 @@ export function AppShell({
             <nav className="space-y-1 flex-1">
               {!isCustomer ? (
                 <>
-                  <NavItem
-                    icon={<LayoutDashboard className="h-4 w-4" />}
-                    label="Dashboard"
-                    active={currentTab === "dashboard"}
-                    onClick={() => {
-                      onSelectTab("dashboard");
-                      setMobileOpen(false);
-                    }}
-                  />
-                  <NavItem
-                    icon={<FileText className="h-4 w-4" />}
-                    label="Quotations"
-                    active={currentTab === "quotations" || currentTab === "quotation-builder"}
-                    count={state.quotations.length}
-                    onClick={() => {
-                      onSelectTab("quotations");
-                      setMobileOpen(false);
-                    }}
-                  />
-                  <NavItem
-                    icon={<Kanban className="h-4 w-4" />}
-                    label="Pipeline"
-                    active={currentTab === "pipeline"}
-                    onClick={() => {
-                      onSelectTab("pipeline");
-                      setMobileOpen(false);
-                    }}
-                  />
-                  <NavItem
-                    icon={<CheckCircle2 className="h-4 w-4" />}
-                    label="Approvals"
-                    active={currentTab === "approvals"}
-                    count={pendingApprovalsCount}
-                    badgeVariant={pendingApprovalsCount > 0 ? "destructive" : "secondary"}
-                    onClick={() => {
-                      onSelectTab("approvals");
-                      setMobileOpen(false);
-                    }}
-                  />
-                  <NavItem
-                    icon={<PackageCheck className="h-4 w-4" />}
-                    label="Fulfillment"
-                    active={currentTab === "fulfillment"}
-                    count={awaitingFulfillmentCount}
-                    badgeVariant={awaitingFulfillmentCount > 0 ? "secondary" : undefined}
-                    onClick={() => {
-                      onSelectTab("fulfillment");
-                      setMobileOpen(false);
-                    }}
-                  />
-                  <NavItem
-                    icon={<Repeat className="h-4 w-4" />}
-                    label="Subscriptions"
-                    active={currentTab === "subscriptions"}
-                    count={state.subscriptions.length}
-                    onClick={() => {
-                      onSelectTab("subscriptions");
-                      setMobileOpen(false);
-                    }}
-                  />
-                  <NavItem
-                    icon={<Receipt className="h-4 w-4" />}
-                    label="Invoices"
-                    active={currentTab === "invoices"}
-                    count={unpaidInvoicesCount}
-                    onClick={() => {
-                      onSelectTab("invoices");
-                      setMobileOpen(false);
-                    }}
-                  />
-                  <NavItem
-                    icon={<HeartPulse className="h-4 w-4" />}
-                    label="Deal Health"
-                    active={currentTab === "deal-health"}
-                    count={activeAlertsCount}
-                    badgeVariant={activeAlertsCount > 0 ? "destructive" : "secondary"}
-                    onClick={() => {
-                      onSelectTab("deal-health");
-                      setMobileOpen(false);
-                    }}
-                  />
-                  <NavItem
-                    icon={<BarChart3 className="h-4 w-4" />}
-                    label="Reports"
-                    active={currentTab === "reports"}
-                    onClick={() => {
-                      onSelectTab("reports");
-                      setMobileOpen(false);
-                    }}
-                  />
+                  {canAccessPage(session?.role, "dashboard") && (
+                    <NavItem
+                      icon={<LayoutDashboard className="h-4 w-4" />}
+                      label="Dashboard"
+                      active={currentTab === "dashboard"}
+                      onClick={() => {
+                        onSelectTab("dashboard");
+                        setMobileOpen(false);
+                      }}
+                    />
+                  )}
+                  {canAccessPage(session?.role, "quotations") && (
+                    <NavItem
+                      icon={<FileText className="h-4 w-4" />}
+                      label="Quotations"
+                      active={currentTab === "quotations" || currentTab === "quotation-builder"}
+                      count={state.quotations.length}
+                      onClick={() => {
+                        onSelectTab("quotations");
+                        setMobileOpen(false);
+                      }}
+                    />
+                  )}
+                  {canAccessPage(session?.role, "pipeline") && (
+                    <NavItem
+                      icon={<Kanban className="h-4 w-4" />}
+                      label="Pipeline"
+                      active={currentTab === "pipeline"}
+                      onClick={() => {
+                        onSelectTab("pipeline");
+                        setMobileOpen(false);
+                      }}
+                    />
+                  )}
+                  {canAccessPage(session?.role, "approvals") && (
+                    <NavItem
+                      icon={<CheckCircle2 className="h-4 w-4" />}
+                      label="Approvals"
+                      active={currentTab === "approvals"}
+                      count={pendingApprovalsCount}
+                      badgeVariant={pendingApprovalsCount > 0 ? "destructive" : "secondary"}
+                      onClick={() => {
+                        onSelectTab("approvals");
+                        setMobileOpen(false);
+                      }}
+                    />
+                  )}
+                  {canAccessPage(session?.role, "fulfillment") && (
+                    <NavItem
+                      icon={<PackageCheck className="h-4 w-4" />}
+                      label="Fulfillment"
+                      active={currentTab === "fulfillment"}
+                      count={awaitingFulfillmentCount}
+                      badgeVariant={awaitingFulfillmentCount > 0 ? "secondary" : undefined}
+                      onClick={() => {
+                        onSelectTab("fulfillment");
+                        setMobileOpen(false);
+                      }}
+                    />
+                  )}
+                  {canAccessPage(session?.role, "subscriptions") && (
+                    <NavItem
+                      icon={<Repeat className="h-4 w-4" />}
+                      label="Subscriptions"
+                      active={currentTab === "subscriptions"}
+                      count={state.subscriptions.length}
+                      onClick={() => {
+                        onSelectTab("subscriptions");
+                        setMobileOpen(false);
+                      }}
+                    />
+                  )}
+                  {canAccessPage(session?.role, "invoices") && (
+                    <NavItem
+                      icon={<Receipt className="h-4 w-4" />}
+                      label="Invoices"
+                      active={currentTab === "invoices"}
+                      count={unpaidInvoicesCount}
+                      onClick={() => {
+                        onSelectTab("invoices");
+                        setMobileOpen(false);
+                      }}
+                    />
+                  )}
+                  {canAccessPage(session?.role, "deal-health") && (
+                    <NavItem
+                      icon={<HeartPulse className="h-4 w-4" />}
+                      label="Deal Health"
+                      active={currentTab === "deal-health"}
+                      count={activeAlertsCount}
+                      badgeVariant={activeAlertsCount > 0 ? "destructive" : "secondary"}
+                      onClick={() => {
+                        onSelectTab("deal-health");
+                        setMobileOpen(false);
+                      }}
+                    />
+                  )}
+                  {canAccessPage(session?.role, "reports") && (
+                    <NavItem
+                      icon={<BarChart3 className="h-4 w-4" />}
+                      label="Reports"
+                      active={currentTab === "reports"}
+                      onClick={() => {
+                        onSelectTab("reports");
+                        setMobileOpen(false);
+                      }}
+                    />
+                  )}
 
-                  {session?.role === "ADMIN" && (
+                  {canAccessPage(session?.role, "governance") && (
+                    <>
+                      <div className="pt-3 pb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Commercial Policy
+                      </div>
+                      <NavItem
+                        icon={<ShieldCheck className="h-4 w-4" />}
+                        label="Discount Governance"
+                        active={currentTab === "governance"}
+                        onClick={() => {
+                          onSelectTab("governance");
+                          setMobileOpen(false);
+                        }}
+                      />
+                    </>
+                  )}
+
+                  {canAccessPage(session?.role, "warehouses") && (
+                    <>
+                      <div className="pt-3 pb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Logistics Operations
+                      </div>
+                      <NavItem
+                        icon={<Building2 className="h-4 w-4" />}
+                        label="Warehouses & Inventory"
+                        active={currentTab === "warehouses"}
+                        onClick={() => {
+                          onSelectTab("warehouses");
+                          setMobileOpen(false);
+                        }}
+                      />
+                    </>
+                  )}
+
+                  {canAccessPage(session?.role, "admin") && (
                     <>
                       <div className="pt-3 pb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                         Admin Settings
