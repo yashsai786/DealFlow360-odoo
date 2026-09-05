@@ -49,7 +49,7 @@ import {
   createBackorders,
   type SplitPlan,
 } from "../modules/fulfillment/service";
-import { addCycle, calculateProration, reconcile } from "../modules/billing/service";
+import { addCycle, calculateProration, calculateCancellationRefund, reconcile } from "../modules/billing/service";
 import { assertCan } from "../modules/identity/service";
 import {
   ApprovalRequired,
@@ -58,7 +58,7 @@ import {
   InvalidStateTransition,
   SubscriptionModificationInvalid,
 } from "../lib/errors";
-import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi } from "../lib/api";
+import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, subscriptionsApi } from "../lib/api";
 
 export interface AppState {
   session: User | null;
@@ -340,6 +340,12 @@ export const identityActions = {
       // Sync subscription plans — DB is authoritative
       const dbPlans = await plansApi.list();
       if (dbPlans.length > 0) set({ plans: dbPlans });
+
+      // Sync subscriptions — DB is authoritative
+      const dbSubscriptions = await subscriptionsApi.list();
+      if (dbSubscriptions && dbSubscriptions.length > 0) {
+        set({ subscriptions: dbSubscriptions });
+      }
 
       // Sync governance config — DB is authoritative over seed defaults
       const dbGovernance = await governanceApi.load();
@@ -863,7 +869,7 @@ export const billingActions = {
     return status;
   },
 
-  modifySubscription(subscriptionId: string, qty: number) {
+  async modifySubscription(subscriptionId: string, qty: number) {
     const user = requireSession();
     assertCan(user.role, "billing.manage");
     const sub = state.subscriptions.find((s) => s.id === subscriptionId);
@@ -871,7 +877,8 @@ export const billingActions = {
     if (sub.status === "CANCELLED")
       throw SubscriptionModificationInvalid("A cancelled subscription cannot be modified.");
     if (qty < 1) throw SubscriptionModificationInvalid("Quantity must be at least one seat.");
-    const proration = calculateProration(sub, qty, sub.unitPrice);
+    const plan = state.plans.find((p) => p.id === sub.planId);
+    const proration = calculateProration(sub, qty, sub.unitPrice, plan);
     const adjustment =
       proration.kind === "NONE"
         ? null
@@ -882,11 +889,17 @@ export const billingActions = {
             note: `${qty - sub.qty > 0 ? "Added" : "Removed"} ${Math.abs(qty - sub.qty)} seats with ${proration.daysRemaining} of ${proration.daysInCycle} days remaining.`,
             at: now(),
           };
+    const adjustments = adjustment ? [adjustment, ...sub.adjustments] : sub.adjustments;
+    try {
+      await subscriptionsApi.update(subscriptionId, { qty, adjustments });
+    } catch (err) {
+      console.error("[Subscription] Failed to persist seat modification:", err);
+    }
     state = {
       ...state,
       subscriptions: state.subscriptions.map((s) =>
         s.id === subscriptionId
-          ? { ...s, qty, adjustments: adjustment ? [adjustment, ...s.adjustments] : s.adjustments }
+          ? { ...s, qty, adjustments }
           : s,
       ),
     };
@@ -897,9 +910,40 @@ export const billingActions = {
     return proration;
   },
 
-  setSubscriptionStatus(subscriptionId: string, status: Subscription["status"]) {
+  async setSubscriptionStatus(subscriptionId: string, status: Subscription["status"]) {
     const user = requireSession();
     assertCan(user.role, "billing.manage");
+    const sub = state.subscriptions.find((s) => s.id === subscriptionId);
+    if (!sub) return;
+    const plan = state.plans.find((p) => p.id === sub.planId);
+
+    let adjustments = sub.adjustments;
+    let nextBillDate = sub.nextBillDate;
+
+    if (status === "CANCELLED") {
+      const refund = calculateCancellationRefund(sub, plan);
+      if (refund.isRefundable) {
+        const refundAdj = {
+          id: uid("adj"),
+          kind: "CREDIT" as const,
+          amount: refund.refundAmount,
+          note: `Cancellation Refund: ₹${refund.refundAmount} (${refund.refundRatePct}% of ${refund.daysRemaining} unused days)`,
+          at: now(),
+        };
+        adjustments = [refundAdj, ...adjustments];
+        record(`Refund of ₹${refund.refundAmount} calculated for cancellation`, "Subscription", subscriptionId);
+        emit("SubscriptionRefundIssued", `${subscriptionId} · ₹${refund.refundAmount}`);
+      }
+    } else if (status === "ACTIVE") {
+      nextBillDate = addCycle(now(), sub.cycle);
+    }
+
+    try {
+      await subscriptionsApi.update(subscriptionId, { status, nextBillDate, adjustments });
+    } catch (err) {
+      console.error("[Subscription] Failed to persist status update:", err);
+    }
+
     state = {
       ...state,
       subscriptions: state.subscriptions.map((s) =>
@@ -907,8 +951,8 @@ export const billingActions = {
           ? {
               ...s,
               status,
-              nextBillDate:
-                status === "ACTIVE" ? addCycle(now(), s.cycle) : s.nextBillDate,
+              nextBillDate,
+              adjustments,
             }
           : s,
       ),
@@ -1105,12 +1149,30 @@ export const adminActions = {
     record(`Updated ${saved.name}`, "Warehouse", saved.id);
   },
 
+  async createPlan(plan: SubscriptionPlan) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    const saved = await plansApi.create(plan);
+    set({ plans: [...state.plans, saved] });
+    record(`Created subscription plan ${saved.name}`, "SubscriptionPlan", saved.id);
+    return saved;
+  },
+
+  async deletePlan(planId: string) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    await plansApi.delete(planId);
+    set({ plans: state.plans.filter((p) => p.id !== planId) });
+    record(`Deleted subscription plan ${planId}`, "SubscriptionPlan", planId);
+  },
+
   async savePlan(plan: SubscriptionPlan) {
     const user = requireSession();
     assertCan(user.role, "admin.configure");
     const saved = await plansApi.update(plan);
     set({ plans: state.plans.map((p) => (p.id === saved.id ? saved : p)) });
     record(`Updated ${saved.name}`, "SubscriptionPlan", saved.id);
+    return saved;
   },
 
   async saveStock(warehouseId: string, productId: string, available: number, replenishmentDays: number = 7) {

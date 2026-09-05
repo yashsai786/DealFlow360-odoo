@@ -7,6 +7,7 @@ import type {
   IWarehouseRepository,
   IInventoryRepository,
   ISubscriptionPlanRepository,
+  ISubscriptionRepository,
   IGovernanceRepository,
   IQuotationRepository,
   ICustomerRepository,
@@ -25,6 +26,8 @@ import type {
   Warehouse,
   InventoryItem,
   SubscriptionPlan,
+  Subscription,
+  BillingAdjustment,
   Quotation,
   QuotationLine,
   QuotationStage,
@@ -296,10 +299,16 @@ export class PrismaSubscriptionPlanRepository implements ISubscriptionPlanReposi
     }));
   }
 
-  async update(plan: SubscriptionPlan): Promise<SubscriptionPlan> {
-    const row = await prisma.subscriptionPlan.update({
-      where: { id: plan.id },
-      data: { price: plan.price, prorationEnabled: plan.prorationEnabled, cancellationPolicy: plan.cancellationPolicy },
+  async create(plan: SubscriptionPlan): Promise<SubscriptionPlan> {
+    const row = await prisma.subscriptionPlan.create({
+      data: {
+        id: plan.id,
+        name: plan.name,
+        cycle: plan.cycle,
+        price: plan.price,
+        prorationEnabled: plan.prorationEnabled,
+        cancellationPolicy: plan.cancellationPolicy,
+      },
     });
     return {
       id: row.id,
@@ -309,6 +318,31 @@ export class PrismaSubscriptionPlanRepository implements ISubscriptionPlanReposi
       prorationEnabled: row.prorationEnabled,
       cancellationPolicy: row.cancellationPolicy,
     };
+  }
+
+  async update(plan: SubscriptionPlan): Promise<SubscriptionPlan> {
+    const row = await prisma.subscriptionPlan.update({
+      where: { id: plan.id },
+      data: {
+        name: plan.name,
+        cycle: plan.cycle,
+        price: plan.price,
+        prorationEnabled: plan.prorationEnabled,
+        cancellationPolicy: plan.cancellationPolicy,
+      },
+    });
+    return {
+      id: row.id,
+      name: row.name,
+      cycle: row.cycle as BillingCycle,
+      price: row.price,
+      prorationEnabled: row.prorationEnabled,
+      cancellationPolicy: row.cancellationPolicy,
+    };
+  }
+
+  async delete(id: string): Promise<void> {
+    await prisma.subscriptionPlan.delete({ where: { id } });
   }
 }
 
@@ -374,6 +408,91 @@ export const warehouseRepository = new PrismaWarehouseRepository();
 export const inventoryRepository = new PrismaInventoryRepository();
 export const subscriptionPlanRepository = new PrismaSubscriptionPlanRepository();
 export const governanceRepository = new PrismaGovernanceRepository();
+
+/* ------------------------------------- SUBSCRIPTION REPOSITORY */
+export class PrismaSubscriptionRepository implements ISubscriptionRepository {
+  private toSubscription(row: {
+    id: string;
+    customerId: string;
+    quotationId: string;
+    planId: string;
+    qty: number;
+    unitPrice: number;
+    cycle: string;
+    startDate: string;
+    nextBillDate: string;
+    status: string;
+    adjustments: string;
+  }): Subscription {
+    let adjustments: BillingAdjustment[] = [];
+    try {
+      adjustments = JSON.parse(row.adjustments || "[]");
+    } catch {
+      adjustments = [];
+    }
+    return {
+      id: row.id,
+      customerId: row.customerId,
+      quotationId: row.quotationId,
+      planId: row.planId,
+      qty: row.qty,
+      unitPrice: row.unitPrice,
+      cycle: row.cycle as BillingCycle,
+      startDate: row.startDate,
+      nextBillDate: row.nextBillDate,
+      status: row.status as any,
+      adjustments,
+    };
+  }
+
+  async list(): Promise<Subscription[]> {
+    const rows = await prisma.subscription.findMany();
+    return rows.map((r) => this.toSubscription(r));
+  }
+
+  async findById(id: string): Promise<Subscription | null> {
+    const row = await prisma.subscription.findUnique({ where: { id } });
+    if (!row) return null;
+    return this.toSubscription(row);
+  }
+
+  async create(sub: Subscription): Promise<Subscription> {
+    const row = await prisma.subscription.create({
+      data: {
+        id: sub.id,
+        customerId: sub.customerId,
+        quotationId: sub.quotationId,
+        planId: sub.planId,
+        qty: sub.qty,
+        unitPrice: sub.unitPrice,
+        cycle: sub.cycle,
+        startDate: sub.startDate,
+        nextBillDate: sub.nextBillDate,
+        status: sub.status,
+        adjustments: JSON.stringify(sub.adjustments || []),
+      },
+    });
+    return this.toSubscription(row);
+  }
+
+  async update(id: string, patch: Partial<Subscription>): Promise<Subscription> {
+    const data: any = {};
+    if (patch.qty !== undefined) data.qty = patch.qty;
+    if (patch.unitPrice !== undefined) data.unitPrice = patch.unitPrice;
+    if (patch.planId !== undefined) data.planId = patch.planId;
+    if (patch.status !== undefined) data.status = patch.status;
+    if (patch.nextBillDate !== undefined) data.nextBillDate = patch.nextBillDate;
+    if (patch.adjustments !== undefined) data.adjustments = JSON.stringify(patch.adjustments);
+
+    const row = await prisma.subscription.update({
+      where: { id },
+      data,
+    });
+    return this.toSubscription(row);
+  }
+}
+
+export const subscriptionRepository = new PrismaSubscriptionRepository();
 
 /* -------------------------------------- QUOTATION REPOSITORY */
 export class PrismaQuotationRepository implements IQuotationRepository {

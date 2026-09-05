@@ -5,6 +5,7 @@ import type {
   Warehouse,
   InventoryItem,
   SubscriptionPlan,
+  Subscription,
   Quotation,
   DiscountEvaluation,
   Approval,
@@ -77,10 +78,34 @@ export const inventoryApi = {
 /* ---------------------------------------------- PLANS API CLIENT */
 export const plansApi = {
   list: () => apiClient<SubscriptionPlan[]>("/api/plans"),
+  create: (plan: SubscriptionPlan) =>
+    apiClient<SubscriptionPlan>("/api/plans", {
+      method: "POST",
+      body: JSON.stringify(plan),
+    }),
   update: (plan: SubscriptionPlan) =>
     apiClient<SubscriptionPlan>("/api/plans", {
       method: "PATCH",
       body: JSON.stringify(plan),
+    }),
+  delete: (id: string) =>
+    apiClient<{ deleted: boolean; id: string }>(`/api/plans?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+};
+
+/* -------------------------------------- SUBSCRIPTIONS API CLIENT */
+export const subscriptionsApi = {
+  list: () => apiClient<Subscription[]>("/api/subscriptions"),
+  create: (subscription: Subscription) =>
+    apiClient<Subscription>("/api/subscriptions", {
+      method: "POST",
+      body: JSON.stringify(subscription),
+    }),
+  update: (id: string, patch: Partial<Subscription>) =>
+    apiClient<Subscription>("/api/subscriptions", {
+      method: "PATCH",
+      body: JSON.stringify({ id, ...patch }),
     }),
 };
 

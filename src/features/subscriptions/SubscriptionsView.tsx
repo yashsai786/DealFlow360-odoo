@@ -4,7 +4,7 @@ import {
   customerMap,
   billingActions,
 } from "../../infrastructure/store";
-import { calculateBillingSchedule, calculateProration } from "../../modules/billing/service";
+import { calculateBillingSchedule, calculateProration, calculateCancellationRefund } from "../../modules/billing/service";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -25,6 +25,7 @@ import {
   PlayCircle,
   XCircle,
   TrendingUp,
+  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -45,32 +46,44 @@ export function SubscriptionsView() {
   const [newSeatCount, setNewSeatCount] = useState<number>(selectedSub?.qty ?? 1);
 
   const prorationPreview = selectedSub
-    ? calculateProration(selectedSub, newSeatCount, selectedSub.unitPrice)
+    ? calculateProration(selectedSub, newSeatCount, selectedSub.unitPrice, plan)
     : null;
 
   const schedule = selectedSub ? calculateBillingSchedule(selectedSub, 6) : [];
 
-  const handleModifySeats = () => {
+  const handleModifySeats = async () => {
     if (!selectedSub) return;
     try {
-      const res = billingActions.modifySubscription(selectedSub.id, newSeatCount);
+      const res = await billingActions.modifySubscription(selectedSub.id, newSeatCount);
       toast.success(
         res?.kind === "CHARGE"
           ? `Added seats! Prorated additional charge of ₹${res.difference.toFixed(2)} applied.`
           : res?.kind === "CREDIT"
             ? `Reduced seats! Prorated credit adjustment of ₹${Math.abs(res.difference).toFixed(2)} credited.`
-            : "Seat count updated.",
+            : "Seat count updated (takes effect next cycle).",
       );
     } catch (err: any) {
       toast.error(err.message || "Failed to modify subscription");
     }
   };
 
-  const handleSetStatus = (status: "ACTIVE" | "PAUSED" | "CANCELLED") => {
+  const handleSetStatus = async (status: "ACTIVE" | "PAUSED" | "CANCELLED") => {
     if (!selectedSub) return;
     try {
-      billingActions.setSubscriptionStatus(selectedSub.id, status);
-      toast.success(`Subscription marked as ${status}.`);
+      if (status === "CANCELLED") {
+        const refund = calculateCancellationRefund(selectedSub, plan);
+        await billingActions.setSubscriptionStatus(selectedSub.id, status);
+        if (refund.isRefundable) {
+          toast.success(
+            `Contract cancelled. Issued prorated refund of ₹${refund.refundAmount.toFixed(2)} (${refund.refundRatePct}% of ${refund.daysRemaining} remaining days).`,
+          );
+        } else {
+          toast.success(`Subscription cancelled (${refund.policyNotes}).`);
+        }
+      } else {
+        await billingActions.setSubscriptionStatus(selectedSub.id, status);
+        toast.success(`Subscription marked as ${status}.`);
+      }
     } catch (err: any) {
       toast.error(err.message || "Failed to update status");
     }
@@ -194,9 +207,15 @@ export function SubscriptionsView() {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleSetStatus("CANCELLED")}
-                        className="h-7 text-xs text-rose-600 hover:text-rose-700"
+                        className="h-7 text-xs text-rose-600 hover:text-rose-700 gap-1"
                       >
-                        <XCircle className="h-3.5 w-3.5 mr-1" /> Cancel Contract
+                        <XCircle className="h-3.5 w-3.5" />
+                        <span>Cancel Contract</span>
+                        {plan && calculateCancellationRefund(selectedSub, plan).isRefundable && (
+                          <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-300 font-mono py-0 px-1">
+                            ₹{calculateCancellationRefund(selectedSub, plan).refundAmount} refund
+                          </Badge>
+                        )}
                       </Button>
                     )}
                   </div>
@@ -216,6 +235,15 @@ export function SubscriptionsView() {
                     <p className="text-[11px] text-muted-foreground">
                       Scaling seats immediately credits the unused days of the previous tier and applies a prorated charge for the remaining period.
                     </p>
+
+                    {plan && !plan.prorationEnabled && (
+                      <div className="p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-[11px] flex items-center gap-1.5">
+                        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                        <span>
+                          Mid-cycle proration is disabled on this plan ({plan.name}). Seat adjustments will apply starting from the next renewal cycle without interim charges.
+                        </span>
+                      </div>
+                    )}
 
                     <div className="flex flex-col sm:flex-row items-center gap-3 pt-1">
                       <div className="flex items-center gap-2">

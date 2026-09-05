@@ -6,6 +6,7 @@ import type {
   Warehouse,
   InventoryItem,
   SubscriptionPlan,
+  Subscription,
   Quotation,
   Customer,
   Approval,
@@ -49,7 +50,16 @@ export interface IInventoryRepository {
 
 export interface ISubscriptionPlanRepository {
   list(): Promise<SubscriptionPlan[]>;
+  create(plan: SubscriptionPlan): Promise<SubscriptionPlan>;
   update(plan: SubscriptionPlan): Promise<SubscriptionPlan>;
+  delete(id: string): Promise<void>;
+}
+
+export interface ISubscriptionRepository {
+  list(): Promise<Subscription[]>;
+  findById(id: string): Promise<Subscription | null>;
+  create(subscription: Subscription): Promise<Subscription>;
+  update(id: string, patch: Partial<Subscription>): Promise<Subscription>;
 }
 
 export interface IGovernanceRepository {
