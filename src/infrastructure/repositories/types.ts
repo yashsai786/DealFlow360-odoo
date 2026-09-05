@@ -100,4 +100,7 @@ export interface IInvoiceRepository {
 export interface IFulfillmentRepository {
   create(order: FulfillmentOrder): Promise<FulfillmentOrder>;
   list(): Promise<FulfillmentOrder[]>;
+  findById(id: string): Promise<FulfillmentOrder | null>;
+  update(id: string, patch: Partial<FulfillmentOrder>): Promise<FulfillmentOrder>;
 }
+

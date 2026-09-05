@@ -11,8 +11,10 @@ import type {
   Approval,
   Invoice,
   FulfillmentOrder,
+  Recommendation,
 } from "../../modules/shared/types";
 import type { GovernanceConfig } from "../../modules/discount-governance/service";
+import type { UpsellConfig } from "../../modules/recommendations/service";
 
 /* ------------------------------------------------ AUTH API CLIENT */
 export const authApi = {
@@ -107,13 +109,117 @@ export const subscriptionsApi = {
       method: "PATCH",
       body: JSON.stringify({ id, ...patch }),
     }),
+  calculateProration: (subscriptionId: string, newQty: number, apply = false) =>
+    apiClient<{
+      subscriptionId: string;
+      oldQty: number;
+      newQty: number;
+      proration: any;
+      applied: boolean;
+      subscription: Subscription;
+    }>("/api/subscriptions/proration", {
+      method: "POST",
+      body: JSON.stringify({ subscriptionId, newQty, apply }),
+    }),
+  getBreakdown: (quotationId: string) =>
+    apiClient<any>("/api/subscriptions/breakdown", {
+      method: "POST",
+      body: JSON.stringify({ quotationId }),
+    }),
+  getSchedule: (subscriptionId: string, periods = 6) =>
+    apiClient<{
+      subscriptionId: string;
+      cycle: string;
+      qty: number;
+      unitPrice: number;
+      periods: number;
+      schedule: any[];
+    }>("/api/subscriptions/schedule", {
+      method: "POST",
+      body: JSON.stringify({ subscriptionId, periods }),
+    }),
+  cancelSubscription: (subscriptionId: string) =>
+    apiClient<{
+      subscriptionId: string;
+      status: string;
+      refund: any;
+      creditNoteIssued: boolean;
+      adjustments: any[];
+    }>("/api/subscriptions/cancel", {
+      method: "POST",
+      body: JSON.stringify({ subscriptionId }),
+    }),
 };
+
+/* --------------------------------------- FULFILLMENT API CLIENT */
+export const fulfillmentApi = {
+  list: () => apiClient<FulfillmentOrder[]>("/api/fulfillment"),
+  create: (order: FulfillmentOrder) =>
+    apiClient<FulfillmentOrder>("/api/fulfillment", {
+      method: "POST",
+      body: JSON.stringify(order),
+    }),
+  update: (id: string, patch: Partial<FulfillmentOrder>) =>
+    apiClient<FulfillmentOrder>("/api/fulfillment", {
+      method: "PATCH",
+      body: JSON.stringify({ id, ...patch }),
+    }),
+  calculateSplit: (quotationId: string) =>
+    apiClient<{
+      quotationId: string;
+      splitPlan: any;
+      warehouseBreakdown: any[];
+    }>("/api/fulfillment/split", {
+      method: "POST",
+      body: JSON.stringify({ quotationId }),
+    }),
+  checkConsolidation: (orderId: string, arrivalWarehouseId?: string, arrivalProductId?: string, arrivalQty?: number) =>
+    apiClient<{
+      orderId: string;
+      promptAvailable: boolean;
+      promptMessage: string;
+      consolidatableBackorders: any[];
+    }>("/api/fulfillment/consolidate", {
+      method: "POST",
+      body: JSON.stringify({ orderId, arrivalWarehouseId, arrivalProductId, arrivalQty }),
+    }),
+};
+
 
 /* ------------------------------------------- GOVERNANCE API CLIENT */
 export const governanceApi = {
   load: () => apiClient<GovernanceConfig>("/api/governance"),
   save: (config: GovernanceConfig) =>
     apiClient<GovernanceConfig>("/api/governance", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+};
+
+/* -------------------------------------- RECOMMENDATIONS API CLIENT */
+export const recommendationsApi = {
+  get: (quotationId: string, config?: UpsellConfig) =>
+    apiClient<{
+      quotationId: string;
+      count: number;
+      recommendations: Recommendation[];
+    }>("/api/recommendations", {
+      method: "POST",
+      body: JSON.stringify({ quotationId, config }),
+    }),
+  dismiss: (quotationId: string, productId: string) =>
+    apiClient<{
+      quotationId: string;
+      dismissedProductId: string;
+      dismissedRecommendations: string[];
+      success: boolean;
+    }>("/api/recommendations/dismiss", {
+      method: "POST",
+      body: JSON.stringify({ quotationId, productId }),
+    }),
+  getConfig: () => apiClient<UpsellConfig>("/api/recommendations"),
+  saveConfig: (config: Partial<UpsellConfig>) =>
+    apiClient<UpsellConfig>("/api/recommendations", {
       method: "PUT",
       body: JSON.stringify(config),
     }),

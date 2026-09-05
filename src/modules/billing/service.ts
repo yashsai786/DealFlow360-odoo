@@ -3,6 +3,10 @@ import type {
   Invoice,
   InvoiceStatus,
   Payment,
+  Product,
+  ProductCategory,
+  Quotation,
+  QuotationLine,
   Subscription,
   SubscriptionPlan,
 } from "../shared/types";
@@ -167,3 +171,126 @@ export function reconcile(invoice: Invoice, extra: Payment[] = []): InvoiceStatu
   if (paid + 0.01 < invoice.amount) return "PARTIALLY_PAID";
   return "PAID";
 }
+
+export interface OrderLineItemCalculated {
+  id: string;
+  productId: string;
+  productName: string;
+  category: ProductCategory;
+  qty: number;
+  unit: string;
+  unitPrice: number;
+  discountPct: number;
+  taxPct: number;
+  subtotal: number;
+  taxAmount: number;
+  total: number;
+  cycle?: BillingCycle;
+  annualValue?: number;
+}
+
+export interface OrderLinesClassification {
+  quotationId: string;
+  quotationNumber: string;
+  stage: string;
+  oneTimeLines: OrderLineItemCalculated[];
+  recurringLines: OrderLineItemCalculated[];
+  oneTimeSubtotal: number;
+  oneTimeTax: number;
+  oneTimeTotal: number;
+  recurringSubtotal: number;
+  recurringTax: number;
+  recurringTotal: number;
+  totalOrderInitialValue: number;
+  totalAnnualRecurringRunRate: number;
+  hasBoth: boolean;
+}
+
+/**
+ * Classifies quotation lines into one-time capital items (Hardware, Services)
+ * and recurring commitments (Subscriptions), computing itemized and annualized totals.
+ */
+export function classifyOrderLines(
+  quotation: Quotation,
+  productsInput: Record<string, Product> | Product[],
+): OrderLinesClassification {
+  const products: Record<string, Product> = Array.isArray(productsInput)
+    ? Object.fromEntries(productsInput.map((p) => [p.id, p]))
+    : productsInput;
+
+  const oneTimeLines: OrderLineItemCalculated[] = [];
+  const recurringLines: OrderLineItemCalculated[] = [];
+
+  let oneTimeSubtotal = 0;
+  let oneTimeTax = 0;
+  let recurringSubtotal = 0;
+  let recurringTax = 0;
+  let totalAnnualRecurringRunRate = 0;
+
+  for (const line of quotation.lines) {
+    const product = products[line.productId];
+    const name = product ? product.name : line.productId;
+    const category = product ? product.category : "Hardware";
+    const unit = product ? product.unit : "unit";
+    const cycle = product?.cycle || (category === "Subscriptions" ? "Monthly" : undefined);
+    const isRecurring = category === "Subscriptions" || Boolean(cycle);
+
+    const gross = line.qty * line.unitPrice;
+    const discount = (gross * line.discountPct) / 100;
+    const net = gross - discount;
+    const tax = (net * line.taxPct) / 100;
+    const lineTotal = net + tax;
+
+    const multiplier = cycle === "Monthly" ? 12 : cycle === "Quarterly" ? 4 : 1;
+    const annualValue = isRecurring ? round(lineTotal * multiplier) : undefined;
+
+    const calculated: OrderLineItemCalculated = {
+      id: line.id,
+      productId: line.productId,
+      productName: name,
+      category,
+      qty: line.qty,
+      unit,
+      unitPrice: line.unitPrice,
+      discountPct: line.discountPct,
+      taxPct: line.taxPct,
+      subtotal: round(net),
+      taxAmount: round(tax),
+      total: round(lineTotal),
+      cycle,
+      annualValue,
+    };
+
+    if (isRecurring) {
+      recurringLines.push(calculated);
+      recurringSubtotal += net;
+      recurringTax += tax;
+      totalAnnualRecurringRunRate += annualValue || 0;
+    } else {
+      oneTimeLines.push(calculated);
+      oneTimeSubtotal += net;
+      oneTimeTax += tax;
+    }
+  }
+
+  const oneTimeTotal = round(oneTimeSubtotal + oneTimeTax);
+  const recurringTotal = round(recurringSubtotal + recurringTax);
+
+  return {
+    quotationId: quotation.id,
+    quotationNumber: quotation.number,
+    stage: quotation.stage,
+    oneTimeLines,
+    recurringLines,
+    oneTimeSubtotal: round(oneTimeSubtotal),
+    oneTimeTax: round(oneTimeTax),
+    oneTimeTotal,
+    recurringSubtotal: round(recurringSubtotal),
+    recurringTax: round(recurringTax),
+    recurringTotal,
+    totalOrderInitialValue: round(oneTimeTotal + recurringTotal),
+    totalAnnualRecurringRunRate: round(totalAnnualRecurringRunRate),
+    hasBoth: oneTimeLines.length > 0 && recurringLines.length > 0,
+  };
+}
+

@@ -60,7 +60,7 @@ import {
   InvalidStateTransition,
   SubscriptionModificationInvalid,
 } from "../lib/errors";
-import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, subscriptionsApi, approvalsApi } from "../lib/api";
+import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, subscriptionsApi, approvalsApi, recommendationsApi, fulfillmentApi } from "../lib/api";
 
 export interface AppState {
   session: User | null;
@@ -394,6 +394,12 @@ export const identityActions = {
       if (dbApprovals && dbApprovals.length > 0) {
         set({ approvals: dbApprovals });
       }
+
+      // Sync fulfillment orders — DB is authoritative
+      const dbOrders = await fulfillmentApi.list();
+      if (dbOrders && dbOrders.length > 0) {
+        set({ orders: dbOrders });
+      }
     } catch (error) {
       console.error("[DealFlow360] syncWithDatabase failed:", error);
     } finally {
@@ -623,13 +629,19 @@ export const quotationActions = {
     notify();
   },
 
-  dismissRecommendation(quotationId: string, productId: string) {
+  async dismissRecommendation(quotationId: string, productId: string) {
     const quotation = state.quotations.find((q) => q.id === quotationId);
     if (!quotation) return;
+    const updated = [...quotation.dismissedRecommendations, productId];
     replaceQuotation({
       ...quotation,
-      dismissedRecommendations: [...quotation.dismissedRecommendations, productId],
+      dismissedRecommendations: updated,
     });
+    try {
+      await recommendationsApi.dismiss(quotationId, productId);
+    } catch (err) {
+      console.error("[Recommendations] Failed to persist dismissal:", err);
+    }
     notify();
   },
 
@@ -712,7 +724,7 @@ export const approvalActions = {
 /* ------------------------------------------------------------ fulfillment */
 
 export const fulfillmentActions = {
-  acceptSplit(orderId: string) {
+  async acceptSplit(orderId: string) {
     const user = requireSession();
     assertCan(user.role, "fulfillment.manage");
     const order = state.orders.find((o) => o.id === orderId);
@@ -751,6 +763,15 @@ export const fulfillmentActions = {
           : o,
       ),
     };
+    try {
+      await fulfillmentApi.update(orderId, {
+        allocations: plan.allocations,
+        backorders,
+        status: backorders.length ? "BACKORDERED" : "ALLOCATED",
+      });
+    } catch (err) {
+      console.error("[Fulfillment] Failed to persist accepted split:", err);
+    }
     record("Accepted suggested warehouse split", "Fulfillment", orderId);
     emit("FulfillmentSplitCreated", `${orderId} · ${plan.shipmentCount} shipments`);
     if (backorders.length) emit("BackorderCreated", `${orderId} · ${backorders[0]!.qty} units`);
@@ -758,7 +779,7 @@ export const fulfillmentActions = {
     return { backorders, plan };
   },
 
-  overrideSplit(orderId: string, allocations: { warehouseId: string; productId: string; qty: number }[]) {
+  async overrideSplit(orderId: string, allocations: { warehouseId: string; productId: string; qty: number }[]) {
     const user = requireSession();
     assertCan(user.role, "fulfillment.manage");
     const order = state.orders.find((o) => o.id === orderId);
@@ -819,6 +840,15 @@ export const fulfillmentActions = {
           : o,
       ),
     };
+    try {
+      await fulfillmentApi.update(orderId, {
+        allocations: enriched,
+        backorders: createBackorders(shortages),
+        status: shortages.length ? "BACKORDERED" : "ALLOCATED",
+      });
+    } catch (err) {
+      console.error("[Fulfillment] Failed to persist override:", err);
+    }
     record("Manually overrode warehouse allocation", "Fulfillment", orderId);
     emit("FulfillmentSplitCreated", `${orderId} · manual override`);
     notify();
@@ -852,7 +882,7 @@ export const fulfillmentActions = {
     notify();
   },
 
-  consolidate(orderId: string, backorderId: string) {
+  async consolidate(orderId: string, backorderId: string) {
     const user = requireSession();
     assertCan(user.role, "fulfillment.manage");
     const order = state.orders.find((o) => o.id === orderId);
@@ -878,6 +908,10 @@ export const fulfillmentActions = {
       shipmentCost: warehouse.shipmentCost,
     });
 
+    const updatedBackorders = order.backorders.map((b) =>
+      b.id === backorderId ? { ...b, status: "CONSOLIDATED" as const } : b,
+    );
+
     state = {
       ...state,
       inventory,
@@ -887,20 +921,27 @@ export const fulfillmentActions = {
               ...o,
               inventoryVersion: undefined,
               allocations,
-              backorders: o.backorders.map((b) =>
-                b.id === backorderId ? { ...b, status: "CONSOLIDATED" as const } : b,
-              ),
+              backorders: updatedBackorders,
               status: "ALLOCATED",
             }
           : o,
       ) as FulfillmentOrder[],
     };
+    try {
+      await fulfillmentApi.update(orderId, {
+        allocations,
+        backorders: updatedBackorders,
+        status: "ALLOCATED",
+      });
+    } catch (err) {
+      console.error("[Fulfillment] Failed to persist consolidation:", err);
+    }
     record("Consolidated backorder into shipment", "Fulfillment", orderId);
     emit("BackorderConsolidated", `${orderId}`);
     notify();
   },
 
-  ship(orderId: string) {
+  async ship(orderId: string) {
     const user = requireSession();
     assertCan(user.role, "fulfillment.manage");
     const order = state.orders.find((o) => o.id === orderId);
@@ -913,6 +954,14 @@ export const fulfillmentActions = {
         o.id === orderId ? { ...o, status: "SHIPPED", shippedAt: now() } : o,
       ),
     };
+    try {
+      await fulfillmentApi.update(orderId, {
+        status: "SHIPPED",
+        shippedAt: now(),
+      });
+    } catch (err) {
+      console.error("[Fulfillment] Failed to persist shipment:", err);
+    }
     const quotation = state.quotations.find((q) => q.id === order.quotationId);
     if (quotation && quotation.stage === "FULFILLMENT") {
       replaceQuotation(transition(quotation, "INVOICED"));
@@ -977,12 +1026,18 @@ export const billingActions = {
             id: uid("adj"),
             kind: proration.kind,
             amount: Math.abs(proration.difference),
-            note: `${qty - sub.qty > 0 ? "Added" : "Removed"} ${Math.abs(qty - sub.qty)} seats with ${proration.daysRemaining} of ${proration.daysInCycle} days remaining.`,
+            note:
+              proration.kind === "CREDIT"
+                ? `Credit Note Issued: Reduced ${Math.abs(qty - sub.qty)} seats with ${proration.daysRemaining} of ${proration.daysInCycle} days remaining.`
+                : `Prorated Charge: Added ${Math.abs(qty - sub.qty)} seats with ${proration.daysRemaining} of ${proration.daysInCycle} days remaining.`,
             at: now(),
           };
     const adjustments = adjustment ? [adjustment, ...sub.adjustments] : sub.adjustments;
     try {
-      await subscriptionsApi.update(subscriptionId, { qty, adjustments });
+      const res = await subscriptionsApi.calculateProration(subscriptionId, qty, true);
+      if (res?.subscription?.adjustments) {
+        // sync returned DB adjustments
+      }
     } catch (err) {
       console.error("[Subscription] Failed to persist seat modification:", err);
     }
@@ -1018,21 +1073,32 @@ export const billingActions = {
           id: uid("adj"),
           kind: "CREDIT" as const,
           amount: refund.refundAmount,
-          note: `Cancellation Refund: ₹${refund.refundAmount} (${refund.refundRatePct}% of ${refund.daysRemaining} unused days)`,
+          note: `Cancellation Credit Note: ₹${refund.refundAmount.toFixed(2)} (${refund.refundRatePct}% of ${refund.daysRemaining} unused days)`,
           at: now(),
         };
         adjustments = [refundAdj, ...adjustments];
-        record(`Refund of ₹${refund.refundAmount} calculated for cancellation`, "Subscription", subscriptionId);
-        emit("SubscriptionRefundIssued", `${subscriptionId} · ₹${refund.refundAmount}`);
+        record(`Credit Note of ₹${refund.refundAmount.toFixed(2)} issued for cancellation`, "Subscription", subscriptionId);
+        emit("SubscriptionRefundIssued", `${subscriptionId} · ₹${refund.refundAmount.toFixed(2)}`);
+      }
+      try {
+        const res = await subscriptionsApi.cancelSubscription(subscriptionId);
+        if (res?.adjustments) adjustments = res.adjustments;
+      } catch (err) {
+        console.error("[Subscription] Failed to persist cancellation:", err);
       }
     } else if (status === "ACTIVE") {
       nextBillDate = addCycle(now(), sub.cycle);
-    }
-
-    try {
-      await subscriptionsApi.update(subscriptionId, { status, nextBillDate, adjustments });
-    } catch (err) {
-      console.error("[Subscription] Failed to persist status update:", err);
+      try {
+        await subscriptionsApi.update(subscriptionId, { status, nextBillDate, adjustments });
+      } catch (err) {
+        console.error("[Subscription] Failed to persist status update:", err);
+      }
+    } else {
+      try {
+        await subscriptionsApi.update(subscriptionId, { status, nextBillDate, adjustments });
+      } catch (err) {
+        console.error("[Subscription] Failed to persist status update:", err);
+      }
     }
 
     state = {

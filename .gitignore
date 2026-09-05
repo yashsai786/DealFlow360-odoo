@@ -9,3 +9,4 @@ package-lock.json
 .wrangler/
 dev.db
 dev.db-journal
+scratch/
