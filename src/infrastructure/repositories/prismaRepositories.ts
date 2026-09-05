@@ -73,6 +73,14 @@ export class PrismaUserRepository implements IUserRepository {
     };
   }
 
+  async getPasswordHash(email: string): Promise<string | null> {
+    const row = await prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() },
+      select: { passwordHash: true },
+    });
+    return row?.passwordHash ?? null;
+  }
+
   async list(): Promise<User[]> {
     const rows = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });
     return rows.map((r) => ({
@@ -84,13 +92,14 @@ export class PrismaUserRepository implements IUserRepository {
     }));
   }
 
-  async create(user: User): Promise<User> {
+  async create(user: User, passwordHash?: string): Promise<User> {
     const row = await prisma.user.create({
       data: {
         id: user.id,
         name: user.name,
         email: user.email.toLowerCase().trim(),
         role: user.role,
+        passwordHash: passwordHash ?? null,
         customerId: user.customerId ?? null,
       },
     });

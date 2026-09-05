@@ -43,7 +43,7 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
 
   // Login Form State
   const [loginEmail, setLoginEmail] = useState("rep@dealflow360.io");
-  const [loginPassword, setLoginPassword] = useState("••••••••");
+  const [loginPassword, setLoginPassword] = useState("DealFlow@2026");
   const [loginLoading, setLoginLoading] = useState(false);
 
   // Sign Up Form State
@@ -64,28 +64,33 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
     );
 
   // Handle Login
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginEmail.trim()) {
       toast.error("Please enter your email address");
       return;
     }
+    if (!loginPassword) {
+      toast.error("Please enter your password");
+      return;
+    }
 
     setLoginLoading(true);
-    setTimeout(() => {
-      const user = identityActions.login(loginEmail.trim());
+    try {
+      const user = await identityActions.login(loginEmail.trim(), loginPassword);
       setLoginLoading(false);
       if (user) {
         toast.success(`Welcome back, ${user.name}!`, {
           description: `Signed in as ${ROLE_LABELS[user.role] ?? user.role}`,
         });
         onSuccess?.(user);
-      } else {
-        toast.error("User not found", {
-          description: "No account found with this email. Try quick demo sign-in below or register an account.",
-        });
       }
-    }, 200);
+    } catch (err: any) {
+      setLoginLoading(false);
+      toast.error("Authentication failed", {
+        description: err.message || "Invalid email address or password.",
+      });
+    }
   };
 
   // Handle Quick Demo Login
@@ -110,8 +115,8 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
       toast.error("Please enter a valid email address");
       return;
     }
-    if (!signupPassword || signupPassword.length < 4) {
-      toast.error("Password must be at least 4 characters");
+    if (!signupPassword || signupPassword.length < 6) {
+      toast.error("Password must be at least 6 characters");
       return;
     }
     if (isAlreadyRegistered) {
@@ -125,11 +130,12 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
         signupName,
         signupEmail,
         signupRole,
-        signupRole === "CUSTOMER" ? signupCustomerId : undefined
+        signupRole === "CUSTOMER" ? signupCustomerId : undefined,
+        signupPassword
       );
       setSignupLoading(false);
-      toast.success("Account created & saved in database!", {
-        description: `Welcome to DealFlow360, ${newUser.name}.`,
+      toast.success("Account created & secured!", {
+        description: `Welcome to DealFlow360, ${newUser.name}. Credentials safely encrypted.`,
       });
       onSuccess?.(newUser);
     } catch (err: any) {

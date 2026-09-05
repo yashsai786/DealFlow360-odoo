@@ -8,12 +8,13 @@ datasource db {
 }
 
 model User {
-  id         String   @id
-  name       String
-  email      String   @unique
-  role       String
-  customerId String?
-  createdAt  DateTime @default(now())
+  id           String   @id
+  name         String
+  email        String   @unique
+  role         String
+  passwordHash String?
+  customerId   String?
+  createdAt    DateTime @default(now())
 }
 
 model Customer {

@@ -14,11 +14,15 @@ import {
   AUDIT,
 } from "../src/infrastructure/seed";
 import { DEFAULT_CONFIG } from "../src/modules/discount-governance/service";
+import { hashPassword } from "../src/lib/auth/password";
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log("Seeding SQLite database with DealFlow360 enterprise dataset...");
+
+  // Default hashed password for demo accounts
+  const defaultPasswordHash = await hashPassword("DealFlow@2026");
 
   // Clean all tables
   await prisma.auditEntry.deleteMany({});
@@ -49,6 +53,7 @@ async function main() {
         name: u.name,
         email: u.email,
         role: u.role,
+        passwordHash: defaultPasswordHash,
         customerId: u.customerId || null,
       },
     });

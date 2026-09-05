@@ -18,8 +18,9 @@ import type { GovernanceConfig } from "../../modules/discount-governance/service
 export interface IUserRepository {
   findById(id: string): Promise<User | null>;
   findByEmail(email: string): Promise<User | null>;
+  getPasswordHash(email: string): Promise<string | null>;
   list(): Promise<User[]>;
-  create(user: User): Promise<User>;
+  create(user: User, passwordHash?: string): Promise<User>;
   update(id: string, patch: Partial<User>): Promise<User>;
 }
 

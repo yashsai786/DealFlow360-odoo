@@ -13,7 +13,8 @@ export async function POST(request: Request) {
       parsed.data.name,
       parsed.data.email,
       parsed.data.role,
-      parsed.data.customerId
+      parsed.data.customerId,
+      parsed.data.password
     );
 
     return apiSuccess(user, undefined, 201);

@@ -236,25 +236,53 @@ function requireSession() {
 /* -------------------------------------------------------------- identity */
 
 export const identityActions = {
-  login(email: string) {
-    const user = state.users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (!user) return null;
-    set({ session: user });
-    record("Signed in", "Session", user.id);
-    emit("UserSignedIn", `${user.name} (${user.role})`);
-    return user;
+  async login(email: string, password?: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: normalizedEmail, password: password || "" }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errMsg =
+          errorData.error?.message ||
+          errorData.error ||
+          (response.status === 401 ? "Invalid email address or password." : "Login failed.");
+        throw new Error(errMsg);
+      }
+
+      const resData = await response.json();
+      const authenticatedUser: User = resData.data || resData;
+
+      const exists = state.users.some((u) => u.id === authenticatedUser.id);
+      set({
+        users: exists ? state.users : [...state.users, authenticatedUser],
+        session: authenticatedUser,
+      });
+      record("Signed in", "Session", authenticatedUser.id);
+      emit("UserSignedIn", `${authenticatedUser.name} (${authenticatedUser.role})`);
+      return authenticatedUser;
+    } catch (err: any) {
+      console.error("[Auth] Login error:", err);
+      throw err;
+    }
   },
-  async signup(name: string, email: string, role: Role, customerId?: string) {
+  async signup(name: string, email: string, role: Role, customerId?: string, password?: string) {
     const normalizedEmail = email.trim().toLowerCase();
     const existing = state.users.find((u) => u.email.toLowerCase() === normalizedEmail);
     if (existing) {
       throw new Error("This email / ID is already registered.");
     }
-    const newUser: User = {
+    const newUser = {
       id: uid("u"),
       name: name.trim(),
       email: normalizedEmail,
       role,
+      password,
       ...(role === "CUSTOMER" && customerId ? { customerId } : {}),
     };
 
