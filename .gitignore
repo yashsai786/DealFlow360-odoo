@@ -4,3 +4,8 @@ dist-ssr
 *.local
 package-lock.json
 .DS_Store
+
+.output/
+.wrangler/
+dev.db
+dev.db-journal

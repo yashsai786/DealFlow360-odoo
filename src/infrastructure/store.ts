@@ -255,14 +255,31 @@ export const identityActions = {
       ...(role === "CUSTOMER" && customerId ? { customerId } : {}),
     };
 
-    // 1. Immediately update reactive state & localStorage
-    set({
-      users: [...state.users, newUser],
-      session: newUser,
-    });
-    record("Registered account", "User", newUser.id);
-    emit("UserRegistered", `${newUser.name} as ${newUser.role}`);
-    return newUser;
+    // Make API call to backend
+    try {
+      const response = await fetch("/api/users/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUser),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to sign up (${response.status})`);
+      }
+      const createdUser = await response.json();
+      
+      set({
+        users: [...state.users, createdUser],
+        session: createdUser,
+      });
+      record("Registered account", "User", createdUser.id);
+      emit("UserRegistered", `${createdUser.name} as ${createdUser.role}`);
+      return createdUser;
+    } catch (err: any) {
+      console.error("[Auth] Signup error:", err);
+      throw err;
+    }
   },
   async updateProfile(userId: string, updates: { name?: string; email?: string }) {
     const user = state.users.find((u) => u.id === userId);
@@ -272,17 +289,44 @@ export const identityActions = {
       ...(updates.name ? { name: updates.name.trim() } : {}),
       ...(updates.email ? { email: updates.email.trim().toLowerCase() } : {}),
     };
-    const updatedUsers = state.users.map((u) => (u.id === userId ? updatedUser : u));
-    set({
-      users: updatedUsers,
-      session: state.session?.id === userId ? updatedUser : state.session,
-    });
-    record("Updated profile details", "User", userId);
-    emit("UserProfileUpdated", updatedUser.name);
-    return updatedUser;
+
+    try {
+      const response = await fetch("/api/users/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedUser),
+      });
+      if (!response.ok) throw new Error("Failed to update profile on backend");
+      
+      const serverUser = await response.json();
+      const updatedUsers = state.users.map((u) => (u.id === userId ? serverUser : u));
+      set({
+        users: updatedUsers,
+        session: state.session?.id === userId ? serverUser : state.session,
+      });
+      record("Updated profile details", "User", userId);
+      emit("UserProfileUpdated", serverUser.name);
+      return serverUser;
+    } catch (err) {
+      console.error("[Auth] Update profile error:", err);
+      return null;
+    }
   },
   async syncWithDatabase() {
-    // Pure frontend in-memory mode - no backend needed
+    try {
+      const response = await fetch("/api/users");
+      if (response.ok) {
+        const dbUsers: User[] = await response.json();
+        // Merge dbUsers with local default state
+        const currentIds = new Set(state.users.map((u) => u.id));
+        const newUsers = dbUsers.filter((u) => !currentIds.has(u.id));
+        if (newUsers.length > 0) {
+          set({ users: [...state.users, ...newUsers] });
+        }
+      }
+    } catch (error) {
+      console.error("[DealFlow360] Failed to sync users with backend SQLite database", error);
+    }
   },
   logout() {
     if (state.session) {
