@@ -277,6 +277,7 @@ export interface Recommendation {
   confidence: number;
   promotion?: string | undefined;
   price: number;
+  isPromoted?: boolean | undefined;
 }
 
 export type DealHealthStatus = "Healthy" | "Watch" | "At Risk" | "Critical";

@@ -21,14 +21,18 @@ export const CATEGORY_CEILINGS: Record<ProductCategory, number> = {
   Subscriptions: 12,
 };
 
+import { type UpsellConfig, DEFAULT_UPSELL_CONFIG } from "../recommendations/service";
+
 export interface GovernanceConfig {
   tierCeilings: Record<CustomerTier, number>;
   categoryCeilings: Record<ProductCategory, number>;
+  upsellConfig?: UpsellConfig;
 }
 
 export const DEFAULT_CONFIG: GovernanceConfig = {
   tierCeilings: TIER_CEILINGS,
   categoryCeilings: CATEGORY_CEILINGS,
+  upsellConfig: DEFAULT_UPSELL_CONFIG,
 };
 
 export function effectiveCeiling(

@@ -15,6 +15,7 @@ import type {
   Quotation,
   QuotationLine,
   QuotationStage,
+  RecommendationRule,
   Role,
   Subscription,
   SubscriptionPlan,
@@ -42,6 +43,7 @@ import {
   calculateBlendedRisk,
   type GovernanceConfig,
 } from "../modules/discount-governance/service";
+import { DEFAULT_UPSELL_CONFIG } from "../modules/recommendations/service";
 import { calculateTotals, canTransition, round } from "../modules/quotations/service";
 import {
   calculateWarehouseSplit,
@@ -1238,5 +1240,78 @@ export const adminActions = {
     const wName = state.warehouses.find((w) => w.id === warehouseId)?.name || warehouseId;
     record(`Stock updated for ${pName} at ${wName}: ${saved.available} units`, "Inventory", `${warehouseId}_${productId}`);
     return saved;
+  },
+
+  async setUpsellMargin(minMarginPct: number) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    const currentUpsell = state.governance.upsellConfig ?? DEFAULT_UPSELL_CONFIG;
+    const updated: GovernanceConfig = {
+      ...state.governance,
+      upsellConfig: {
+        ...currentUpsell,
+        minMarginPct,
+      },
+    };
+    await governanceApi.save(updated);
+    set({ governance: updated });
+    record(`Updated minimum upsell margin to ${minMarginPct}%`, "Governance", "upsell");
+    notify();
+  },
+
+  async togglePromotedProduct(productId: string) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    const currentUpsell = state.governance.upsellConfig ?? DEFAULT_UPSELL_CONFIG;
+    const current = new Set(currentUpsell.promotedProductIds || []);
+    if (current.has(productId)) current.delete(productId);
+    else current.add(productId);
+
+    const updated: GovernanceConfig = {
+      ...state.governance,
+      upsellConfig: {
+        ...currentUpsell,
+        promotedProductIds: Array.from(current),
+      },
+    };
+    await governanceApi.save(updated);
+    set({ governance: updated });
+    record(`Toggled promoted status for ${productId}`, "Governance", "upsell");
+    notify();
+  },
+
+  async addPairingRule(rule: RecommendationRule) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    const currentUpsell = state.governance.upsellConfig ?? DEFAULT_UPSELL_CONFIG;
+    const updated: GovernanceConfig = {
+      ...state.governance,
+      upsellConfig: {
+        ...currentUpsell,
+        rules: [rule, ...(currentUpsell.rules || [])],
+      },
+    };
+    await governanceApi.save(updated);
+    set({ governance: updated });
+    record(`Added recommendation pairing rule`, "Governance", "upsell");
+    notify();
+  },
+
+  async deletePairingRule(index: number) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    const currentUpsell = state.governance.upsellConfig ?? DEFAULT_UPSELL_CONFIG;
+    const updatedRules = (currentUpsell.rules || []).filter((_, i) => i !== index);
+    const updated: GovernanceConfig = {
+      ...state.governance,
+      upsellConfig: {
+        ...currentUpsell,
+        rules: updatedRules,
+      },
+    };
+    await governanceApi.save(updated);
+    set({ governance: updated });
+    record(`Deleted recommendation pairing rule`, "Governance", "upsell");
+    notify();
   },
 };

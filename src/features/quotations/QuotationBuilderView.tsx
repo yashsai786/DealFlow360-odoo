@@ -153,7 +153,7 @@ export function QuotationBuilderView({
   // Active quotation data
   const totals = totalsOf(state, quotation);
   const evaluation = evaluate(state, quotation);
-  const recommendations = getRecommendations(quotation, products);
+  const recommendations = getRecommendations(quotation, products, state.governance?.upsellConfig);
 
   // Line operations
   const handleAddLine = async (prodId?: string) => {
@@ -559,7 +559,14 @@ export function QuotationBuilderView({
                   >
                     <div>
                       <div className="flex items-center justify-between font-semibold">
-                        <span>{rec.productName}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span>{rec.productName}</span>
+                          {rec.isPromoted && (
+                            <Badge className="bg-amber-500 hover:bg-amber-500 text-white text-[9px] px-1.5 py-0 uppercase tracking-wider font-bold">
+                              Promoted
+                            </Badge>
+                          )}
+                        </div>
                         <span className="font-mono text-primary">₹{rec.price}</span>
                       </div>
                       <p className="text-[11px] text-muted-foreground mt-1">{rec.reason}</p>

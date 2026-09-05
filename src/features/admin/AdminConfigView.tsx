@@ -55,7 +55,11 @@ import {
   CheckCircle2,
   ShieldCheck,
   RefreshCw,
+  Star,
+  TrendingUp,
+  ArrowRight,
 } from "lucide-react";
+import type { RecommendationRule } from "../../modules/recommendations/service";
 import { toast } from "sonner";
 
 export function AdminConfigView() {
@@ -251,6 +255,94 @@ export function AdminConfigView() {
     }
   };
 
+  // Upsell & Cross-Sell State (A6)
+  const upsellConfig = state.governance?.upsellConfig || {
+    minMarginPct: 15,
+    promotedProductIds: ["p-warranty"],
+    rules: [],
+  };
+  const [upsellMargin, setUpsellMargin] = useState<number>(upsellConfig.minMarginPct);
+  const [pairingModal, setPairingModal] = useState<{
+    open: boolean;
+    triggerProductId: string;
+    suggestedProductId: string;
+    reason: string;
+    confidence: number;
+    promotion: string;
+  }>({
+    open: false,
+    triggerProductId: "",
+    suggestedProductId: "",
+    reason: "Commonly purchased together",
+    confidence: 0.85,
+    promotion: "",
+  });
+  const [productSearch, setProductSearch] = useState("");
+
+  const handleSaveUpsellMargin = async () => {
+    try {
+      await adminActions.setUpsellMargin(upsellMargin);
+      toast.success(`Minimum upsell profit margin updated to ${upsellMargin}%. Recommendations refreshed.`);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update margin threshold");
+    }
+  };
+
+  const handleTogglePromoted = async (productId: string) => {
+    try {
+      await adminActions.togglePromotedProduct(productId);
+      const isCurrentlyPromoted = (state.governance?.upsellConfig?.promotedProductIds || []).includes(productId);
+      const pName = state.products.find((p) => p.id === productId)?.name || productId;
+      if (isCurrentlyPromoted) {
+        toast.success(`Removed ${pName} from promoted recommendations.`);
+      } else {
+        toast.success(`Promoted ${pName}! It will rank #1 in quotation suggestions.`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to toggle promoted status");
+    }
+  };
+
+  const handleAddPairingRule = async () => {
+    if (!pairingModal.triggerProductId || !pairingModal.suggestedProductId) {
+      toast.error("Please select both a trigger product and an upsell product.");
+      return;
+    }
+    if (pairingModal.triggerProductId === pairingModal.suggestedProductId) {
+      toast.error("Trigger and suggested products must be different.");
+      return;
+    }
+    try {
+      await adminActions.addPairingRule({
+        triggerProductId: pairingModal.triggerProductId,
+        suggestedProductId: pairingModal.suggestedProductId,
+        reason: pairingModal.reason || "Commonly purchased together",
+        confidence: Number(pairingModal.confidence) || 0.8,
+        promotion: pairingModal.promotion ? pairingModal.promotion : undefined,
+      });
+      toast.success("Upsell pairing rule added successfully.");
+      setPairingModal({
+        open: false,
+        triggerProductId: "",
+        suggestedProductId: "",
+        reason: "Commonly purchased together",
+        confidence: 0.85,
+        promotion: "",
+      });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to add pairing rule");
+    }
+  };
+
+  const handleDeletePairingRule = async (idx: number) => {
+    try {
+      await adminActions.deletePairingRule(idx);
+      toast.success("Pairing rule removed.");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete rule");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -277,6 +369,10 @@ export function AdminConfigView() {
           <TabsTrigger value="plans" className="text-xs flex items-center gap-1.5 h-8">
             <Repeat className="h-3.5 w-3.5" />
             Subscription Plans
+          </TabsTrigger>
+          <TabsTrigger value="upsell" className="text-xs flex items-center gap-1.5 h-8">
+            <Sparkles className="h-3.5 w-3.5" />
+            Upsell & Cross-Sell
           </TabsTrigger>
         </TabsList>
 
@@ -1016,6 +1112,263 @@ export function AdminConfigView() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Tab 5: Upsell & Cross-Sell Rules (A6) */}
+        <TabsContent value="upsell" className="space-y-6">
+          {/* Section A: Minimum Margin Cutoff */}
+          <Card className="shadow-xs border-border">
+            <CardHeader className="p-4 border-b border-border">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <CardTitle className="text-xs font-semibold flex items-center gap-1.5">
+                    <TrendingUp className="h-4 w-4 text-primary" />
+                    Recommendation Margin Threshold (Cutoff)
+                  </CardTitle>
+                  <CardDescription className="text-[11px] mt-0.5">
+                    Filter out product recommendations where profit margin % is below this cutoff. Quotation sales panels will never suggest margin-dilutive items.
+                  </CardDescription>
+                </div>
+                <Badge variant="outline" className="font-mono text-xs w-fit">
+                  Active Cutoff: {state.governance?.upsellConfig?.minMarginPct ?? 15}%
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-4 max-w-md">
+                <div className="flex-1 space-y-1">
+                  <label className="text-xs font-medium text-foreground">Minimum Margin Cutoff (%)</label>
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={upsellMargin}
+                      onChange={(e) => setUpsellMargin(Number(e.target.value))}
+                      className="h-9 text-xs bg-background pr-8"
+                    />
+                    <span className="absolute right-3 top-2.5 text-xs text-muted-foreground">%</span>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={handleSaveUpsellMargin}
+                  className="mt-5 h-9 text-xs flex items-center gap-1 bg-primary text-primary-foreground"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  Save Threshold
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Section B: Promoted Products Ranking */}
+          <Card className="shadow-xs border-border">
+            <CardHeader className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-xs font-semibold flex items-center gap-1.5">
+                  <Star className="h-4 w-4 text-amber-500 fill-amber-500" />
+                  Promoted Products Catalog
+                </CardTitle>
+                <CardDescription className="text-[11px] mt-0.5">
+                  Promoted items receive a 1.5× recommendation ranking boost and appear with a distinct "PROMOTED" badge in sales reps' quotation panels.
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative w-48">
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Search catalog..."
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    className="h-8 text-xs pl-8 bg-background"
+                  />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Product</TableHead>
+                    <TableHead className="text-xs">Category</TableHead>
+                    <TableHead className="text-xs text-right">Price</TableHead>
+                    <TableHead className="text-xs text-right">Cost</TableHead>
+                    <TableHead className="text-xs text-right">Margin %</TableHead>
+                    <TableHead className="text-xs text-center">Status</TableHead>
+                    <TableHead className="text-xs text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {state.products
+                    .filter(
+                      (p) =>
+                        p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
+                        p.category.toLowerCase().includes(productSearch.toLowerCase()) ||
+                        p.id.toLowerCase().includes(productSearch.toLowerCase())
+                    )
+                    .map((p) => {
+                      const marginPct = p.price > 0 ? Math.round(((p.price - p.cost) / p.price) * 100) : 0;
+                      const isPromoted = (state.governance?.upsellConfig?.promotedProductIds || []).includes(p.id);
+                      return (
+                        <TableRow key={p.id}>
+                          <TableCell className="text-xs font-medium">
+                            <div className="flex items-center gap-1.5">
+                              {p.name}
+                              {isPromoted && (
+                                <Badge className="bg-amber-500 hover:bg-amber-500 text-white text-[9px] px-1 py-0 uppercase">
+                                  Promoted
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground font-mono">{p.id}</div>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            <Badge variant="outline" className="text-[10px]">{p.category}</Badge>
+                          </TableCell>
+                          <TableCell className="text-xs text-right font-mono">₹{p.price.toLocaleString()}</TableCell>
+                          <TableCell className="text-xs text-right font-mono text-muted-foreground">₹{p.cost.toLocaleString()}</TableCell>
+                          <TableCell className="text-xs text-right font-mono">
+                            <span
+                              className={
+                                marginPct >= (state.governance?.upsellConfig?.minMarginPct ?? 15)
+                                  ? "text-emerald-600 dark:text-emerald-400 font-semibold"
+                                  : "text-destructive font-semibold"
+                              }
+                            >
+                              {marginPct}%
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {isPromoted ? (
+                              <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 text-[10px] border-amber-300">
+                                ⭐ Promoted Top-Rank
+                              </Badge>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground">Standard</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant={isPromoted ? "outline" : "default"}
+                              size="sm"
+                              onClick={() => handleTogglePromoted(p.id)}
+                              className={`h-7 text-[11px] ${
+                                isPromoted
+                                  ? "text-amber-700 hover:bg-amber-50 dark:text-amber-300 border-amber-300"
+                                  : "bg-primary text-primary-foreground"
+                              }`}
+                            >
+                              {isPromoted ? "Demote" : "Promote"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          {/* Section C: Dynamic Pairing Rules */}
+          <Card className="shadow-xs border-border">
+            <CardHeader className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-xs font-semibold flex items-center gap-1.5">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  Product Affinity & Upsell Pairings
+                </CardTitle>
+                <CardDescription className="text-[11px] mt-0.5">
+                  Define automated pairings: when a customer adds a Trigger Product to the quote, the engine recommends the Upsell Product.
+                </CardDescription>
+              </div>
+              <Button
+                size="sm"
+                onClick={() =>
+                  setPairingModal({
+                    open: true,
+                    triggerProductId: state.products[0]?.id || "",
+                    suggestedProductId: state.products[1]?.id || "",
+                    reason: "Frequently bundled together",
+                    confidence: 0.85,
+                    promotion: "",
+                  })
+                }
+                className="h-8 text-xs flex items-center gap-1 bg-primary text-primary-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add Pairing Rule
+              </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Trigger Product</TableHead>
+                    <TableHead className="text-xs">Upsell Suggestion</TableHead>
+                    <TableHead className="text-xs">Reason / Rationale</TableHead>
+                    <TableHead className="text-xs text-center">Confidence</TableHead>
+                    <TableHead className="text-xs">Promo Incentive</TableHead>
+                    <TableHead className="text-xs text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(!state.governance?.upsellConfig?.rules || state.governance.upsellConfig.rules.length === 0) ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-6 text-xs text-muted-foreground">
+                        No pairing rules configured yet. Click "Add Pairing Rule" to set up upsell associations.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    state.governance.upsellConfig.rules.map((rule, idx) => {
+                      const triggerProd = state.products.find((p) => p.id === rule.triggerProductId);
+                      const suggestedProd = state.products.find((p) => p.id === rule.suggestedProductId);
+                      return (
+                        <TableRow key={idx}>
+                          <TableCell className="text-xs font-medium">
+                            <div>{triggerProd?.name || rule.triggerProductId}</div>
+                            <div className="text-[10px] text-muted-foreground font-mono">{rule.triggerProductId}</div>
+                          </TableCell>
+                          <TableCell className="text-xs font-medium">
+                            <div className="flex items-center gap-1 text-primary">
+                              <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                              <span>{suggestedProd?.name || rule.suggestedProductId}</span>
+                            </div>
+                            <div className="text-[10px] text-muted-foreground font-mono ml-4">{rule.suggestedProductId}</div>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{rule.reason}</TableCell>
+                          <TableCell className="text-center">
+                            <Badge variant="outline" className="text-[10px] font-mono">
+                              {Math.round(rule.confidence * 100)}%
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {rule.promotion ? (
+                              <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[10px]">
+                                {rule.promotion}
+                              </Badge>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeletePairingRule(idx)}
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Edit Product Modal */}
@@ -1474,6 +1827,118 @@ export function AdminConfigView() {
             </Button>
             <Button size="sm" onClick={handleSavePlan} className="text-xs bg-primary text-primary-foreground">
               {planModal.isNew ? "Create Plan" : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Pairing Rule Modal */}
+      <Dialog
+        open={pairingModal.open}
+        onOpenChange={(open) => setPairingModal({ ...pairingModal, open })}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              Add Upsell / Cross-Sell Pairing Rule
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              When a sales rep adds the Trigger Product to a quotation, the engine will suggest the Upsell Product.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Trigger Product (In Quote)</label>
+              <Select
+                value={pairingModal.triggerProductId}
+                onValueChange={(val) => setPairingModal({ ...pairingModal, triggerProductId: val })}
+              >
+                <SelectTrigger className="h-8 text-xs bg-background">
+                  <SelectValue placeholder="Select trigger product..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {state.products.map((p) => (
+                    <SelectItem key={p.id} value={p.id} className="text-xs">
+                      {p.name} ({p.id}) - ₹{p.price.toLocaleString()}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Suggested Upsell Product</label>
+              <Select
+                value={pairingModal.suggestedProductId}
+                onValueChange={(val) => setPairingModal({ ...pairingModal, suggestedProductId: val })}
+              >
+                <SelectTrigger className="h-8 text-xs bg-background">
+                  <SelectValue placeholder="Select suggested product..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {state.products
+                    .filter((p) => p.id !== pairingModal.triggerProductId)
+                    .map((p) => (
+                      <SelectItem key={p.id} value={p.id} className="text-xs">
+                        {p.name} ({p.id}) - ₹{p.price.toLocaleString()}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Upsell Reason / Value Proposition</label>
+              <Input
+                value={pairingModal.reason}
+                onChange={(e) => setPairingModal({ ...pairingModal, reason: e.target.value })}
+                placeholder="e.g. Recommended companion for this hardware"
+                className="h-8 text-xs bg-background"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Confidence Score (0.1 - 1.0)</label>
+                <Input
+                  type="number"
+                  step="0.05"
+                  min="0.1"
+                  max="1.0"
+                  value={pairingModal.confidence}
+                  onChange={(e) => setPairingModal({ ...pairingModal, confidence: parseFloat(e.target.value) || 0.8 })}
+                  className="h-8 text-xs bg-background"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Promotion Incentive (Optional)</label>
+                <Input
+                  value={pairingModal.promotion}
+                  onChange={(e) => setPairingModal({ ...pairingModal, promotion: e.target.value })}
+                  placeholder="e.g. 15% Bundle Discount"
+                  className="h-8 text-xs bg-background"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setPairingModal({ ...pairingModal, open: false })}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleAddPairingRule}
+              className="text-xs bg-primary text-primary-foreground"
+            >
+              Add Pairing Rule
             </Button>
           </DialogFooter>
         </DialogContent>
