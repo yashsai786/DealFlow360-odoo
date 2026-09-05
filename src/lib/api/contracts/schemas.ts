@@ -131,6 +131,8 @@ export const UpdateQuotationSchema = z.object({
   requestedDeliveryDate: z.string().optional(),
   promisedDeliveryDate: z.string().optional(),
   escalated: z.boolean().optional(),
+  requests: z.array(z.any()).optional(),
+  messages: z.array(z.any()).optional(),
 });
 
 export const AddQuotationLineSchema = z.object({

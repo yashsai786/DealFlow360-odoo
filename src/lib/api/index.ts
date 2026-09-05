@@ -7,6 +7,7 @@ import type {
   SubscriptionPlan,
   Subscription,
   Quotation,
+  NegotiationMessage,
   DiscountEvaluation,
   Approval,
   Invoice,
@@ -294,6 +295,14 @@ export const quotationsApi = {
       method: "POST",
       body: JSON.stringify({ ids }),
     }),
+  addMessage: (id: string, body: string) =>
+    apiClient<{ quotation: Quotation; message: NegotiationMessage }>(
+      `/api/quotations/${id}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      }
+    ),
 };
 
 /* -------------------------------------------- APPROVALS API CLIENT */

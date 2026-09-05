@@ -1195,21 +1195,48 @@ export const negotiationActions = {
     record("Customer submitted a negotiation request", "Quotation", quotationId, comment);
     emit("NegotiationRequested", quotation.number);
     notify();
+
+    // Persist requests, messages, and stage to backend SQLite database
+    quotationsApi
+      .update(quotationId, {
+        requests: next.requests,
+        messages: next.messages,
+        stage: next.stage,
+        ...(requestedDeliveryDate ? { requestedDeliveryDate } : {}),
+      } as any)
+      .catch((err) => console.warn("Failed to persist negotiation request to backend:", err));
   },
 
-  reply(quotationId: string, body: string) {
+  async reply(quotationId: string, body: string) {
     const user = requireSession();
     const quotation = state.quotations.find((q) => q.id === quotationId);
     if (!quotation || !body.trim()) return;
+
+    // Optimistic update so message shows in UI immediately
+    const tempMsg = {
+      id: uid("m"),
+      author: user.name,
+      role: user.role,
+      body: body.trim(),
+      at: now(),
+    };
     replaceQuotation({
       ...quotation,
-      messages: [
-        ...quotation.messages,
-        { id: uid("m"), author: user.name, role: user.role, body: body.trim(), at: now() },
-      ],
+      messages: [...quotation.messages, tempMsg],
       updatedAt: now(),
     });
     notify();
+
+    // Persist message to database via API
+    try {
+      const res = await quotationsApi.addMessage(quotationId, body.trim());
+      if (res?.quotation) {
+        replaceQuotation(res.quotation);
+        notify();
+      }
+    } catch (err) {
+      console.warn("Failed to persist message to database:", err);
+    }
   },
 
   /**
@@ -1279,6 +1306,14 @@ export const negotiationActions = {
     }
 
     replaceQuotation(next);
+    quotationsApi
+      .update(quotationId, {
+        lines: next.lines,
+        requests: next.requests,
+        messages: next.messages,
+        stage: next.stage,
+      } as any)
+      .catch((err) => console.warn("Failed to persist negotiation response to database:", err));
     record(
       accept ? `Accepted counter discount of ${request.requestedDiscountPct}%` : "Declined counter discount",
       "Negotiation",

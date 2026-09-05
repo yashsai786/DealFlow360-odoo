@@ -6,6 +6,7 @@ import {
   evaluate,
   totalsOf,
   approvalActions,
+  negotiationActions,
 } from "../../infrastructure/store";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
@@ -38,6 +39,8 @@ import {
   History,
   MessageSquareQuote,
   Search,
+  MessageSquare,
+  Send,
 } from "lucide-react";
 import { toast } from "sonner";
 import { canPerformAction } from "../../modules/identity/permissions";
@@ -60,17 +63,40 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
     return q?.ownerId === session?.id;
   });
 
-  const [selectedApprovalId, setSelectedApprovalId] = useState<string>(
-    initialApprovalId || visibleApprovals.find((a) => a.status === "PENDING")?.id || visibleApprovals[0]?.id || "",
+  const pendingApprovals = visibleApprovals.filter((a) => a.status === "PENDING");
+  const pastApprovals = visibleApprovals.filter((a) => a.status !== "PENDING");
+
+  // Quotations with customer inquiries/messages where a revised quotation proposal has not yet been submitted for pending approval
+  const customerInquiries = state.quotations.filter((q) => {
+    if (isSalesRep && q.ownerId !== session?.id) return false;
+    if (!q.messages || q.messages.length === 0) return false;
+    // Exclude if already in pending approvals queue
+    const isPending = pendingApprovals.some((a) => a.quotationId === q.id);
+    if (isPending) return false;
+    // Exclude fulfilled/invoiced/cancelled quotes unless they have open messages
+    if (["FULFILLMENT", "INVOICED", "PAID", "CANCELLED"].includes(q.stage)) return false;
+    return true;
+  });
+
+  const [selectedApprovalId, setSelectedApprovalId] = useState<string | null>(
+    initialApprovalId || visibleApprovals.find((a) => a.status === "PENDING")?.id || null,
+  );
+  const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(
+    !initialApprovalId && !visibleApprovals.some((a) => a.status === "PENDING") && customerInquiries[0]?.id
+      ? customerInquiries[0].id
+      : null,
   );
 
   useEffect(() => {
     if (initialApprovalId) {
       setSelectedApprovalId(initialApprovalId);
+      setSelectedQuoteId(null);
     }
   }, [initialApprovalId]);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [chatInput, setChatInput] = useState("");
+  const [isSendingChat, setIsSendingChat] = useState(false);
 
   // Dialog for Return / Reject reason
   const [decisionModal, setDecisionModal] = useState<{
@@ -83,14 +109,19 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
     reason: "",
   });
 
-  const selectedApproval = visibleApprovals.find((a) => a.id === selectedApprovalId);
-  const quotation = state.quotations.find((q) => q.id === selectedApproval?.quotationId);
+  const quotation = selectedQuoteId
+    ? state.quotations.find((q) => q.id === selectedQuoteId)
+    : selectedApprovalId
+      ? state.quotations.find((q) => q.id === (visibleApprovals.find((a) => a.id === selectedApprovalId)?.quotationId))
+      : (customerInquiries[0] || (visibleApprovals[0] ? state.quotations.find((q) => q.id === visibleApprovals[0].quotationId) : null));
+
+  const selectedApproval = selectedApprovalId
+    ? visibleApprovals.find((a) => a.id === selectedApprovalId)
+    : visibleApprovals.find((a) => a.quotationId === quotation?.id);
+
   const customer = quotation ? customers[quotation.customerId] : null;
   const totals = quotation ? totalsOf(state, quotation) : null;
   const evaluation = quotation ? evaluate(state, quotation) : null;
-
-  const pendingApprovals = visibleApprovals.filter((a) => a.status === "PENDING");
-  const pastApprovals = visibleApprovals.filter((a) => a.status !== "PENDING");
 
   const filteredPending = pendingApprovals.filter((a) => {
     if (!searchQuery.trim()) return true;
@@ -106,6 +137,33 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
       nextStep?.role.toLowerCase().includes(term)
     );
   });
+
+  const filteredInquiries = customerInquiries.filter((q) => {
+    if (!searchQuery.trim()) return true;
+    const term = searchQuery.toLowerCase().trim();
+    const cust = customers[q.customerId ?? ""];
+    const lastMsg = q.messages && q.messages.length > 0 ? q.messages[q.messages.length - 1]?.body : "";
+    return (
+      q.number.toLowerCase().includes(term) ||
+      cust?.name.toLowerCase().includes(term) ||
+      lastMsg.toLowerCase().includes(term)
+    );
+  });
+
+  const handleSendChat = async () => {
+    if (!quotation || !chatInput.trim()) return;
+    const msg = chatInput.trim();
+    setChatInput("");
+    setIsSendingChat(true);
+    try {
+      await negotiationActions.reply(quotation.id, msg);
+      toast.success(`Reply sent to ${customer?.name || "customer"}.`);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to send message");
+    } finally {
+      setIsSendingChat(false);
+    }
+  };
 
   const handleApprove = async () => {
     if (!selectedApproval) return;
@@ -227,6 +285,84 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
             </CardContent>
           </Card>
 
+          {/* Customer Inquiries & Discussions Queue */}
+          <Card className="shadow-xs border-indigo-100 dark:border-indigo-950/60">
+            <CardHeader className="p-3 border-b border-border bg-indigo-50/20 dark:bg-indigo-950/10">
+              <CardTitle className="text-xs font-semibold flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-foreground">
+                  <MessageSquare className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                  Customer Inquiries & Clarifications ({filteredInquiries.length})
+                </span>
+                {filteredInquiries.length > 0 && (
+                  <Badge variant="outline" className="text-[9px] border-indigo-300 text-indigo-700 dark:text-indigo-300 bg-indigo-50/60 font-mono py-0 px-1.5">
+                    Active
+                  </Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-2 space-y-1.5 max-h-72 overflow-y-auto">
+              {filteredInquiries.length === 0 ? (
+                <div className="p-4 text-center text-xs text-muted-foreground">
+                  {searchQuery ? "No customer inquiries matching search" : "No active customer inquiries pending revision"}
+                </div>
+              ) : (
+                filteredInquiries.map((q) => {
+                  const cust = customers[q.customerId ?? ""];
+                  const active = quotation?.id === q.id && !selectedApprovalId;
+                  const lastMsg = q.messages && q.messages.length > 0 ? q.messages[q.messages.length - 1] : null;
+                  const isFromCustomer = lastMsg && (lastMsg.role === "CUSTOMER" || lastMsg.author.toLowerCase().includes("customer") || lastMsg.author.includes("Ortiz"));
+
+                  return (
+                    <div
+                      key={q.id}
+                      onClick={() => {
+                        setSelectedQuoteId(q.id);
+                        setSelectedApprovalId(null);
+                      }}
+                      className={`p-2.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                        active
+                          ? "border-primary bg-primary/5 shadow-xs"
+                          : "border-border hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between font-medium">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-primary font-bold">{q.number}</span>
+                          <Badge
+                            variant="outline"
+                            className={`text-[9px] py-0 px-1 ${
+                              isFromCustomer
+                                ? "border-amber-400 text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40"
+                                : "border-indigo-300 text-indigo-700 dark:text-indigo-300 bg-indigo-50/50"
+                            }`}
+                          >
+                            {isFromCustomer ? "Customer Inquired" : "Discussion"}
+                          </Badge>
+                        </div>
+                        <span className="text-[10px] font-mono text-muted-foreground">
+                          {q.messages.length} msg{q.messages.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-foreground font-semibold mt-1">
+                        {cust?.name} ({cust?.tier} Tier)
+                      </div>
+                      {lastMsg && (
+                        <div className="mt-1.5 p-1.5 rounded bg-muted/50 border border-border/50 text-[11px] text-muted-foreground flex items-start gap-1">
+                          <MessageSquare className="h-3 w-3 mt-0.5 text-indigo-500 shrink-0" />
+                          <span className="truncate italic">"{lastMsg.body}"</span>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground mt-1">
+                        <span>Latest: <strong className="text-foreground">{lastMsg?.author}</strong></span>
+                        <span>{lastMsg ? new Date(lastMsg.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </CardContent>
+          </Card>
+
           {/* Past Approvals */}
           <Card className="shadow-xs">
             <CardHeader className="p-4 pb-2 border-b border-border">
@@ -279,7 +415,7 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
 
         {/* Right 2 Cols: Detailed Risk & Line Evaluation */}
         <div className="lg:col-span-2 space-y-6">
-          {selectedApproval && quotation && customer && totals ? (
+          {quotation && customer && totals ? (
             <>
               <Card className="shadow-xs">
                 <CardHeader className="p-4 border-b border-border flex flex-row items-center justify-between">
@@ -289,11 +425,16 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
                         {quotation.number}
                       </CardTitle>
                       <Badge
-                        variant={selectedApproval.riskLevel === "HIGH" ? "destructive" : "secondary"}
+                        variant={selectedApproval?.riskLevel === "HIGH" ? "destructive" : "secondary"}
                         className="text-xs uppercase font-mono"
                       >
-                        {selectedApproval.riskLevel} Risk Approval
+                        {selectedApproval ? `${selectedApproval.riskLevel} Risk Approval` : `${quotation.stage} Stage`}
                       </Badge>
+                      {quotation.messages && quotation.messages.length > 0 && (
+                        <Badge variant="outline" className="text-[10px] font-mono border-indigo-300 text-indigo-700 dark:text-indigo-300 bg-indigo-50/50">
+                          {quotation.messages.length} msg{quotation.messages.length === 1 ? "" : "s"}
+                        </Badge>
+                      )}
                     </div>
                     <CardDescription className="text-xs mt-0.5">
                       Customer: <strong>{customer.name}</strong> ({customer.tier} Tier) · Net Value:{" "}
@@ -364,6 +505,101 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
                     </ul>
                   </div>
 
+                  {/* Customer Discussion & Direct Chat Card */}
+                  <div className="p-3.5 rounded-lg border border-indigo-200 dark:border-indigo-900 bg-indigo-50/40 dark:bg-indigo-950/20 text-xs space-y-3">
+                    <div className="flex items-center justify-between font-semibold text-foreground">
+                      <div className="flex items-center gap-1.5">
+                        <MessageSquare className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                        <span>Direct Customer Discussion & Clarifications</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="outline" className="text-[10px] font-mono border-indigo-300 text-indigo-700 dark:text-indigo-300 bg-background/60">
+                          {quotation.messages.length} message{quotation.messages.length === 1 ? "" : "s"}
+                        </Badge>
+                        {quotation.stage === "DRAFT" && (
+                          <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 dark:text-amber-400 bg-amber-50/80">
+                            Awaiting Revised Proposal
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 max-h-64 overflow-y-auto p-1 pr-2">
+                      {quotation.messages.map((m) => {
+                        const isCustomer = m.role === "CUSTOMER" || m.author.toLowerCase().includes("customer") || m.author.includes("Ortiz");
+                        const isMe = session?.name && m.author.includes(session.name);
+                        return (
+                          <div
+                            key={m.id}
+                            className={`p-2.5 rounded-lg text-xs space-y-1 max-w-[88%] ${
+                              isMe
+                                ? "ml-auto bg-primary text-primary-foreground shadow-xs"
+                                : isCustomer
+                                  ? "mr-auto bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-foreground"
+                                  : "mr-auto bg-card text-foreground border border-border"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between text-[10px] opacity-85 gap-3">
+                              <div className="flex items-center gap-1.5 font-semibold">
+                                <span>{m.author}</span>
+                                {isCustomer ? (
+                                  <Badge variant="outline" className="text-[9px] py-0 px-1 border-amber-400 text-amber-800 dark:text-amber-300 bg-background/70 font-medium">
+                                    Customer
+                                  </Badge>
+                                ) : (
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[9px] py-0 px-1 font-medium ${
+                                      isMe
+                                        ? "border-primary-foreground/40 text-primary-foreground bg-primary-foreground/10"
+                                        : "border-border text-muted-foreground bg-background/60"
+                                    }`}
+                                  >
+                                    {m.role?.replace("_", " ") || "Reviewer"}
+                                  </Badge>
+                                )}
+                              </div>
+                              <span className="font-mono text-[10px]">
+                                {new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            </div>
+                            <p className="text-xs leading-relaxed whitespace-pre-wrap">{m.body}</p>
+                          </div>
+                        );
+                      })}
+                      {quotation.messages.length === 0 && (
+                        <p className="text-xs text-muted-foreground text-center py-4 italic">
+                          No discussion messages exchanged yet. Use the chat box below to message the customer.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Interactive Chat Input */}
+                    <div className="flex items-center gap-2 pt-2 border-t border-indigo-200/60 dark:border-indigo-900/50">
+                      <Input
+                        placeholder={`Reply to ${customer.name} as ${session?.name || "Reviewer"} (${session?.role?.replace("_", " ") || "Reviewer"})...`}
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendChat();
+                          }
+                        }}
+                        className="text-xs h-8 bg-background flex-1"
+                      />
+                      <Button
+                        size="sm"
+                        onClick={handleSendChat}
+                        disabled={isSendingChat || !chatInput.trim()}
+                        className="h-8 text-xs bg-primary text-primary-foreground shrink-0"
+                      >
+                        <Send className="h-3.5 w-3.5 mr-1" />
+                        Send
+                      </Button>
+                    </div>
+                  </div>
+
                   {/* Line Items Discount Evaluation Table */}
                   <div className="space-y-2">
                     <div className="text-xs font-semibold text-foreground">Line-Level Discount Breakdown</div>
@@ -417,53 +653,55 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
                   </div>
 
                   {/* Multi-Step Approval Chain Status */}
-                  <div className="space-y-2 pt-2">
-                    <div className="text-xs font-semibold text-foreground">Multi-Step Approval Chain Progress</div>
-                    <div className="space-y-2">
-                      {selectedApproval.steps.map((step, idx) => (
-                        <div
-                          key={idx}
-                          className={`p-3 rounded-lg border flex items-center justify-between text-xs ${
-                            step.status === "APPROVED"
-                              ? "border-emerald-200 dark:border-emerald-950 bg-emerald-50/30 dark:bg-emerald-950/20"
-                              : step.status === "PENDING"
-                                ? "border-amber-200 dark:border-amber-950 bg-amber-50/30 dark:bg-amber-950/20"
-                                : "border-rose-200 dark:border-rose-950 bg-rose-50/30 dark:bg-rose-950/20"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center font-bold text-xs">
-                              {idx + 1}
-                            </div>
-                            <div>
-                              <div className="font-semibold text-foreground">
-                                {step.role.replace("_", " ")} Review
-                              </div>
-                              {step.decidedBy && (
-                                <div className="text-[10px] text-muted-foreground">
-                                  Decided by {step.decidedBy} on{" "}
-                                  {new Date(step.decidedAt!).toLocaleDateString()}
-                                  {step.reason && ` · Note: "${step.reason}"`}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          <Badge
-                            variant={
+                  {selectedApproval?.steps && selectedApproval.steps.length > 0 && (
+                    <div className="space-y-2 pt-2">
+                      <div className="text-xs font-semibold text-foreground">Multi-Step Approval Chain Progress</div>
+                      <div className="space-y-2">
+                        {selectedApproval.steps.map((step, idx) => (
+                          <div
+                            key={idx}
+                            className={`p-3 rounded-lg border flex items-center justify-between text-xs ${
                               step.status === "APPROVED"
-                                ? "secondary"
+                                ? "border-emerald-200 dark:border-emerald-950 bg-emerald-50/30 dark:bg-emerald-950/20"
                                 : step.status === "PENDING"
-                                  ? "outline"
-                                  : "destructive"
-                            }
-                            className="text-[10px] uppercase font-mono"
+                                  ? "border-amber-200 dark:border-amber-950 bg-amber-50/30 dark:bg-amber-950/20"
+                                  : "border-rose-200 dark:border-rose-950 bg-rose-50/30 dark:bg-rose-950/20"
+                            }`}
                           >
-                            {step.status}
-                          </Badge>
-                        </div>
-                      ))}
+                            <div className="flex items-center gap-2.5">
+                              <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center font-bold text-xs">
+                                {idx + 1}
+                              </div>
+                              <div>
+                                <div className="font-semibold text-foreground">
+                                  {step.role.replace("_", " ")} Review
+                                </div>
+                                {step.decidedBy && (
+                                  <div className="text-[10px] text-muted-foreground">
+                                    Decided by {step.decidedBy} on{" "}
+                                    {new Date(step.decidedAt!).toLocaleDateString()}
+                                    {step.reason && ` · Note: "${step.reason}"`}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <Badge
+                              variant={
+                                step.status === "APPROVED"
+                                  ? "secondary"
+                                  : step.status === "PENDING"
+                                    ? "outline"
+                                    : "destructive"
+                              }
+                              className="text-[10px] uppercase font-mono"
+                            >
+                              {step.status}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Full Audit Trail Entries */}
                   <div className="space-y-2 pt-2">
@@ -476,7 +714,7 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
                         .filter(
                           (entry) =>
                             entry.entityId === quotation.id ||
-                            entry.entityId === selectedApproval.id
+                            (selectedApproval && entry.entityId === selectedApproval.id)
                         )
                         .slice(0, 8)
                         .map((entry) => (
@@ -499,7 +737,7 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
                         ))}
                       {state.audit.filter(
                         (entry) =>
-                          entry.entityId === quotation.id || entry.entityId === selectedApproval.id
+                          entry.entityId === quotation.id || (selectedApproval && entry.entityId === selectedApproval.id)
                       ).length === 0 && (
                         <div className="p-3 text-center text-muted-foreground text-xs">
                           No audit trail entries recorded yet.
@@ -510,7 +748,7 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
                 </CardContent>
 
                 {/* Managerial Decision Actions */}
-                {selectedApproval.status === "PENDING" && (
+                {selectedApproval?.status === "PENDING" ? (
                   (canPerformAction(session?.role, "approval.decide_manager") || canPerformAction(session?.role, "approval.decide_finance")) ? (
                     <CardFooter className="p-4 border-t border-border bg-muted/20 flex items-center justify-between">
                       <div className="text-xs text-muted-foreground">
@@ -556,6 +794,23 @@ export function ApprovalsView({ onOpenQuote, initialApprovalId }: ApprovalsViewP
                       </div>
                     </CardFooter>
                   )
+                ) : (
+                  <CardFooter className="p-4 border-t border-border bg-muted/10 flex items-center justify-between">
+                    <div className="text-xs text-muted-foreground flex items-center gap-2">
+                      <span className="font-semibold text-amber-600">
+                        Stage: {quotation.stage === "DRAFT" ? "Revision Required" : quotation.stage}
+                      </span>
+                      <span>· {quotation.messages.length > 0 ? "Customer message received. Review discussion above or make adjustments." : "Awaiting updated proposal."}</span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onOpenQuote(quotation.id)}
+                      className="h-8 text-xs"
+                    >
+                      Open Quotation Builder
+                    </Button>
+                  </CardFooter>
                 )}
               </Card>
             </>

@@ -334,11 +334,12 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
   };
 
   // Discussion reply
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!quotation || !chatMessage.trim()) return;
+    const msg = chatMessage.trim();
+    setChatMessage("");
     try {
-      negotiationActions.reply(quotation.id, chatMessage);
-      setChatMessage("");
+      await negotiationActions.reply(quotation.id, msg);
       toast.success("Message sent to sales rep.");
     } catch (err: any) {
       toast.error(err.message || "Message failed");
