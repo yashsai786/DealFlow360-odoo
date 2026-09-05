@@ -76,9 +76,9 @@ export function QuotationBuilderView({
     : customers[selectedCustomerId];
 
   // If creating new quote
-  const handleCreateDraft = () => {
+  const handleCreateDraft = async () => {
     try {
-      const q = quotationActions.create(selectedCustomerId);
+      const q = await quotationActions.create(selectedCustomerId);
       setActiveQuoteId(q.id);
       toast.success(`Created draft quotation ${q.number}`);
     } catch (err: any) {
@@ -146,43 +146,43 @@ export function QuotationBuilderView({
   const recommendations = getRecommendations(quotation, products);
 
   // Line operations
-  const handleAddLine = (prodId?: string) => {
+  const handleAddLine = async (prodId?: string) => {
     const idToAdd = prodId || selectedProductId;
     try {
-      quotationActions.addLine(quotation.id, idToAdd, 1);
+      await quotationActions.addLine(quotation.id, idToAdd, 1);
       toast.success(`Added ${products[idToAdd]?.name}`);
     } catch (err: any) {
       toast.error(err.message || "Failed to add line");
     }
   };
 
-  const handleUpdateDiscount = (lineId: string, disc: number) => {
+  const handleUpdateDiscount = async (lineId: string, disc: number) => {
     try {
-      quotationActions.updateLine(quotation.id, lineId, { discountPct: Math.max(0, Math.min(100, disc)) });
+      await quotationActions.updateLine(quotation.id, lineId, { discountPct: Math.max(0, Math.min(100, disc)) });
     } catch (err: any) {
       toast.error(err.message || "Cannot update line");
     }
   };
 
-  const handleUpdateQty = (lineId: string, qty: number) => {
+  const handleUpdateQty = async (lineId: string, qty: number) => {
     try {
-      quotationActions.updateLine(quotation.id, lineId, { qty: Math.max(1, qty) });
+      await quotationActions.updateLine(quotation.id, lineId, { qty: Math.max(1, qty) });
     } catch (err: any) {
       toast.error(err.message || "Cannot update line");
     }
   };
 
-  const handleRemoveLine = (lineId: string) => {
+  const handleRemoveLine = async (lineId: string) => {
     try {
-      quotationActions.removeLine(quotation.id, lineId);
+      await quotationActions.removeLine(quotation.id, lineId);
     } catch (err: any) {
       toast.error(err.message || "Cannot remove line");
     }
   };
 
-  const handleSubmitForApproval = () => {
+  const handleSubmitForApproval = async () => {
     try {
-      const res = quotationActions.submitForApproval(quotation.id);
+      const res = await quotationActions.submitForApproval(quotation.id);
       if (res?.autoApproved) {
         toast.success("Quotation auto-approved! Discounts are within policy.");
       } else {
@@ -195,9 +195,9 @@ export function QuotationBuilderView({
     }
   };
 
-  const handleConfirmQuotation = () => {
+  const handleConfirmQuotation = async () => {
     try {
-      quotationActions.confirm(quotation.id);
+      await quotationActions.confirm(quotation.id);
       toast.success("Quotation confirmed! Fulfillment orders, invoices, and subscriptions generated.");
     } catch (err: any) {
       toast.error(err.message || "Confirmation failed");

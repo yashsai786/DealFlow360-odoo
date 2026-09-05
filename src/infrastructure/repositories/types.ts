@@ -5,6 +5,11 @@ import type {
   Product,
   Warehouse,
   SubscriptionPlan,
+  Quotation,
+  Customer,
+  Approval,
+  Invoice,
+  FulfillmentOrder,
 } from "../../modules/shared/types";
 import type { GovernanceConfig } from "../../modules/discount-governance/service";
 
@@ -44,4 +49,37 @@ export interface ISubscriptionPlanRepository {
 export interface IGovernanceRepository {
   load(): Promise<GovernanceConfig>;
   save(config: GovernanceConfig): Promise<void>;
+}
+
+export interface IQuotationRepository {
+  list(filter?: { customerId?: string; stage?: string; search?: string }): Promise<Quotation[]>;
+  findById(id: string): Promise<Quotation | null>;
+  findByNumber(number: string): Promise<Quotation | null>;
+  create(quotation: Quotation): Promise<Quotation>;
+  update(id: string, patch: Partial<Quotation>): Promise<Quotation>;
+  delete(id: string): Promise<void>;
+  getNextSequence(): Promise<number>;
+}
+
+export interface ICustomerRepository {
+  findById(id: string): Promise<Customer | null>;
+  list(): Promise<Customer[]>;
+}
+
+export interface IApprovalRepository {
+  findById(id: string): Promise<Approval | null>;
+  findByQuotationId(quotationId: string): Promise<Approval | null>;
+  create(approval: Approval): Promise<Approval>;
+  update(id: string, patch: Partial<Approval>): Promise<Approval>;
+  list(filter?: { status?: string }): Promise<Approval[]>;
+}
+
+export interface IInvoiceRepository {
+  create(invoice: Invoice): Promise<Invoice>;
+  list(): Promise<Invoice[]>;
+}
+
+export interface IFulfillmentRepository {
+  create(order: FulfillmentOrder): Promise<FulfillmentOrder>;
+  list(): Promise<FulfillmentOrder[]>;
 }

@@ -8,40 +8,54 @@ interface RouteMatch {
   params: Record<string, string>;
 }
 
-function findMatchingRoute(pathname: string, appApiDir: string): RouteMatch | null {
-  const cleanPath = pathname.replace(/^\/api\/?/, "").replace(/\/$/, "");
-  const segments = cleanPath ? cleanPath.split("/") : [];
-
-  // 1. Direct match: app/api/<segments>/route.ts
-  const directPath = path.join(appApiDir, ...segments, "route.ts");
-  if (fs.existsSync(directPath)) {
-    return { filePath: directPath, params: {} };
+function matchRouteSegments(
+  currentDir: string,
+  segments: string[],
+  params: Record<string, string> = {}
+): RouteMatch | null {
+  if (segments.length === 0) {
+    const routeFile = path.join(currentDir, "route.ts");
+    if (fs.existsSync(routeFile)) {
+      return { filePath: routeFile, params };
+    }
+    return null;
   }
 
-  // 2. Dynamic route match: e.g. /api/quotations/:id -> app/api/quotations/[id]/route.ts
-  if (segments.length >= 2) {
-    const parentSegments = segments.slice(0, -1);
-    const lastParam = segments[segments.length - 1];
+  const [head, ...tail] = segments;
 
-    const dynamicDir = path.join(appApiDir, ...parentSegments);
-    if (fs.existsSync(dynamicDir)) {
-      const entries = fs.readdirSync(dynamicDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory() && entry.name.startsWith("[") && entry.name.endsWith("]")) {
-          const paramName = entry.name.slice(1, -1);
-          const candidatePath = path.join(dynamicDir, entry.name, "route.ts");
-          if (fs.existsSync(candidatePath)) {
-            return {
-              filePath: candidatePath,
-              params: { [paramName]: lastParam },
-            };
-          }
-        }
+  // 1. Check exact directory match first
+  const exactDir = path.join(currentDir, head);
+  if (fs.existsSync(exactDir) && fs.statSync(exactDir).isDirectory()) {
+    const match = matchRouteSegments(exactDir, tail, params);
+    if (match) return match;
+  }
+
+  // 2. Check dynamic [param] directory match
+  if (fs.existsSync(currentDir) && fs.statSync(currentDir).isDirectory()) {
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name.startsWith("[") && entry.name.endsWith("]")) {
+        const paramName = entry.name.slice(1, -1);
+        const match = matchRouteSegments(
+          path.join(currentDir, entry.name),
+          tail,
+          { ...params, [paramName]: head }
+        );
+        if (match) return match;
       }
     }
   }
 
   return null;
+}
+
+function findMatchingRoute(pathname: string, appApiDir: string): RouteMatch | null {
+  const cleanPath = pathname.replace(/^\/api\/?/, "").replace(/\/$/, "");
+  const segments = cleanPath ? cleanPath.split("/") : [];
+
+  if (!fs.existsSync(appApiDir)) return null;
+
+  return matchRouteSegments(appApiDir, segments);
 }
 
 export function viteApiBridgePlugin(): Plugin {

@@ -58,7 +58,7 @@ import {
   InvalidStateTransition,
   SubscriptionModificationInvalid,
 } from "../lib/errors";
-import { productsApi, usersApi, warehousesApi, plansApi, governanceApi } from "../lib/api";
+import { productsApi, usersApi, warehousesApi, plansApi, governanceApi, quotationsApi } from "../lib/api";
 
 export interface AppState {
   session: User | null;
@@ -338,6 +338,12 @@ export const identityActions = {
       // Sync governance config — DB is authoritative over seed defaults
       const dbGovernance = await governanceApi.load();
       set({ governance: dbGovernance });
+
+      // Sync quotations — DB is authoritative
+      const dbQuotations = await quotationsApi.list();
+      if (dbQuotations && dbQuotations.length > 0) {
+        set({ quotations: dbQuotations });
+      }
     } catch (error) {
       console.error("[DealFlow360] syncWithDatabase failed:", error);
     }
@@ -363,79 +369,75 @@ export const identityActions = {
 /* ------------------------------------------------------------ quotations */
 
 export const quotationActions = {
-  create(customerId: string) {
+  async create(customerId: string) {
     const user = requireSession();
     assertCan(user.role, "quotation.create");
-    const seq = 1048 + state.quotations.filter((q) => q.number.startsWith("Q-10")).length;
-    const quotation: Quotation = {
-      id: uid("q"),
-      number: `Q-${seq}`,
-      customerId,
-      ownerId: user.role === "CUSTOMER" ? "u-rep1" : user.id,
-      stage: "DRAFT",
-      lines: [],
-      createdAt: now(),
-      updatedAt: now(),
-      messages: [],
-      requests: [],
-      dismissedRecommendations: [],
-    };
-    state = { ...state, quotations: [quotation, ...state.quotations] };
-    record("Created quotation", "Quotation", quotation.id);
-    emit("QuotationCreated", quotation.number);
-    notify();
-    return quotation;
+    try {
+      const created = await quotationsApi.create(customerId);
+      state = { ...state, quotations: [created, ...state.quotations.filter((q) => q.id !== created.id)] };
+      record("Created quotation", "Quotation", created.id);
+      emit("QuotationCreated", created.number);
+      notify();
+      return created;
+    } catch (err: any) {
+      console.error("[QuotationActions] create error:", err);
+      throw err;
+    }
   },
 
-  addLine(quotationId: string, productId: string, qty = 1) {
+  async addLine(quotationId: string, productId: string, qty = 1) {
     const user = requireSession();
     assertCan(user.role, "quotation.edit");
     const product = state.products.find((p) => p.id === productId);
-    const quotation = state.quotations.find((q) => q.id === quotationId);
-    if (!product || !quotation) return;
-    const existing = quotation.lines.find((l) => l.productId === productId);
-    const lines: QuotationLine[] = existing
-      ? quotation.lines.map((l) => (l.id === existing.id ? { ...l, qty: l.qty + qty } : l))
-      : [
-          ...quotation.lines,
-          {
-            id: uid("l"),
-            productId,
-            qty,
-            unitPrice: product.price,
-            discountPct: 0,
-            taxPct: product.taxPct,
-          },
-        ];
-    replaceQuotation(touch({ ...quotation, lines }));
-    record(`Added ${product.name} × ${qty}`, "Quotation", quotationId);
-    notify();
-  },
-
-  updateLine(quotationId: string, lineId: string, patch: Partial<QuotationLine>) {
-    const user = requireSession();
-    assertCan(user.role, "quotation.edit");
-    const quotation = state.quotations.find((q) => q.id === quotationId);
-    if (!quotation) return;
-    const lines = quotation.lines.map((l) => (l.id === lineId ? { ...l, ...patch } : l));
-    replaceQuotation(touch({ ...quotation, lines }));
-    if (patch.discountPct !== undefined) {
-      record(`Discount changed to ${patch.discountPct}%`, "Quotation", quotationId);
+    try {
+      const updated = await quotationsApi.addLine(quotationId, { productId, qty });
+      replaceQuotation(updated);
+      if (product) record(`Added ${product.name} × ${qty}`, "Quotation", quotationId);
+      notify();
+      return updated;
+    } catch (err: any) {
+      console.error("[QuotationActions] addLine error:", err);
+      throw err;
     }
-    notify();
   },
 
-  removeLine(quotationId: string, lineId: string) {
+  async updateLine(quotationId: string, lineId: string, patch: Partial<QuotationLine>) {
     const user = requireSession();
     assertCan(user.role, "quotation.edit");
-    const quotation = state.quotations.find((q) => q.id === quotationId);
-    if (!quotation) return;
-    replaceQuotation(touch({ ...quotation, lines: quotation.lines.filter((l) => l.id !== lineId) }));
-    record("Removed a line", "Quotation", quotationId);
-    notify();
+    try {
+      const updated = await quotationsApi.updateLine(quotationId, lineId, {
+        qty: patch.qty,
+        unitPrice: patch.unitPrice,
+        discountPct: patch.discountPct,
+      });
+      replaceQuotation(updated);
+      if (patch.discountPct !== undefined) {
+        record(`Discount changed to ${patch.discountPct}%`, "Quotation", quotationId);
+      }
+      notify();
+      return updated;
+    } catch (err: any) {
+      console.error("[QuotationActions] updateLine error:", err);
+      throw err;
+    }
   },
 
-  moveLine(quotationId: string, lineId: string, direction: -1 | 1) {
+  async removeLine(quotationId: string, lineId: string) {
+    const user = requireSession();
+    assertCan(user.role, "quotation.edit");
+    try {
+      const updated = await quotationsApi.removeLine(quotationId, lineId);
+      replaceQuotation(updated);
+      record("Removed a line", "Quotation", quotationId);
+      notify();
+      return updated;
+    } catch (err: any) {
+      console.error("[QuotationActions] removeLine error:", err);
+      throw err;
+    }
+  },
+
+  async moveLine(quotationId: string, lineId: string, direction: -1 | 1) {
     const quotation = state.quotations.find((q) => q.id === quotationId);
     if (!quotation) return;
     const index = quotation.lines.findIndex((l) => l.id === lineId);
@@ -445,12 +447,13 @@ export const quotationActions = {
     const moved = lines[index]!;
     lines[index] = lines[target]!;
     lines[target] = moved;
-    replaceQuotation({ ...quotation, lines });
+    const updated = await quotationsApi.update(quotationId, { lines } as any);
+    replaceQuotation(updated);
     notify();
+    return updated;
   },
 
-  /** Submits and builds the approval chain from the live risk evaluation. */
-  submitForApproval(quotationId: string) {
+  async submitForApproval(quotationId: string) {
     const user = requireSession();
     assertCan(user.role, "quotation.submit");
     const quotation = state.quotations.find((q) => q.id === quotationId);
@@ -458,103 +461,61 @@ export const quotationActions = {
     if (quotation.lines.length === 0)
       throw ApprovalRequired("Add at least one product line before submitting.");
 
-    const evaluation = evaluate(state, quotation);
-    emit("DiscountRiskDetected", `${quotation.number} · ${evaluation.riskLevel}`);
-
-    if (evaluation.approvalChain.length === 0) {
-      replaceQuotation(transition(quotation, "APPROVED"));
-      record("Auto-approved — inside discount policy", "Quotation", quotationId);
-      emit("QuotationApproved", quotation.number);
+    try {
+      const res = await quotationsApi.submit(quotationId);
+      replaceQuotation(res.quotation);
+      if (res.approval) {
+        state = {
+          ...state,
+          approvals: [res.approval, ...state.approvals.filter((a) => a.quotationId !== quotationId)],
+        };
+      }
+      if (res.autoApproved) {
+        record("Auto-approved — inside discount policy", "Quotation", quotationId);
+        emit("QuotationApproved", res.quotation.number);
+      } else {
+        record("Submitted for approval", "Quotation", quotationId);
+        emit("QuotationSubmittedForApproval", res.quotation.number);
+      }
       notify();
-      return { autoApproved: true, evaluation };
+      return res;
+    } catch (err: any) {
+      console.error("[QuotationActions] submitForApproval error:", err);
+      throw err;
     }
-
-    const approval: Approval = {
-      id: uid("a"),
-      quotationId,
-      status: "PENDING",
-      riskLevel: evaluation.riskLevel,
-      submittedBy: user.id,
-      submittedAt: now(),
-      steps: evaluation.approvalChain.map((role) => ({ role, status: "PENDING" as const })),
-    };
-    state = {
-      ...state,
-      approvals: [approval, ...state.approvals.filter((a) => a.quotationId !== quotationId)],
-    };
-    replaceQuotation(transition(quotation, "PENDING_APPROVAL"));
-    record("Submitted for approval", "Quotation", quotationId);
-    emit("QuotationSubmittedForApproval", quotation.number);
-    notify();
-    return { autoApproved: false, evaluation };
   },
 
-  confirm(quotationId: string) {
+  async confirm(quotationId: string) {
     const user = requireSession();
     assertCan(user.role, "quotation.confirm");
-    const quotation = state.quotations.find((q) => q.id === quotationId);
-    if (!quotation) return;
-    const products = productMap(state);
-    const totals = totalsOf(state, quotation);
-
-    replaceQuotation(transition(quotation, "CONFIRMED"));
-    record("Quotation confirmed", "Quotation", quotationId);
-    emit("QuotationConfirmed", quotation.number);
-
-    // One-time value becomes an invoice, hardware becomes a fulfillment order.
-    if (totals.oneTimeTotal > 0) {
-      const invoice: Invoice = {
-        id: uid("i"),
-        number: `INV-${5003 + state.invoices.length}`,
-        customerId: quotation.customerId,
-        quotationId,
-        amount: round(totals.oneTimeTotal * 1.08),
-        status: "UNPAID",
-        issuedAt: now(),
-        dueDate: new Date(Date.now() + 30 * 86400000).toISOString(),
-        payments: [],
-      };
-      state = { ...state, invoices: [invoice, ...state.invoices] };
-      emit("InvoiceCreated", invoice.number);
+    try {
+      const res = await quotationsApi.confirm(quotationId);
+      replaceQuotation(res.quotation);
+      if (res.invoice) {
+        state = { ...state, invoices: [res.invoice, ...state.invoices] };
+        emit("InvoiceCreated", res.invoice.number);
+      }
+      if (res.fulfillmentOrder) {
+        state = { ...state, orders: [res.fulfillmentOrder, ...state.orders] };
+      }
+      record("Quotation confirmed", "Quotation", quotationId);
+      emit("QuotationConfirmed", res.quotation.number);
+      notify();
+      return res;
+    } catch (err: any) {
+      console.error("[QuotationActions] confirm error:", err);
+      throw err;
     }
+  },
 
-    if (quotation.lines.some((l) => products[l.productId]?.category === "Hardware")) {
-      const order: FulfillmentOrder = {
-        id: uid("f"),
-        quotationId,
-        status: "AWAITING",
-        allocations: [],
-        backorders: [],
-        createdAt: now(),
-        dueAt: new Date(Date.now() + 14 * 86400000).toISOString(),
-      };
-      state = { ...state, orders: [order, ...state.orders] };
-      const moved = state.quotations.find((q) => q.id === quotationId)!;
-      replaceQuotation(transition(moved, "FULFILLMENT"));
+  async refresh() {
+    try {
+      const quotations = await quotationsApi.list();
+      set({ quotations });
+      return quotations;
+    } catch (err) {
+      console.error("[QuotationActions] refresh error:", err);
     }
-
-    // Recurring lines create a subscription with a real billing schedule.
-    for (const line of quotation.lines) {
-      const product = products[line.productId];
-      if (!product?.cycle) continue;
-      const plan = state.plans.find((p) => p.cycle === product.cycle) ?? state.plans[0]!;
-      const subscription: Subscription = {
-        id: uid("s"),
-        customerId: quotation.customerId,
-        quotationId,
-        planId: plan.id,
-        qty: line.qty,
-        unitPrice: round(line.unitPrice * (1 - line.discountPct / 100)),
-        cycle: product.cycle,
-        startDate: now(),
-        nextBillDate: addCycle(now(), product.cycle),
-        status: "ACTIVE",
-        adjustments: [],
-      };
-      state = { ...state, subscriptions: [subscription, ...state.subscriptions] };
-      emit("SubscriptionCreated", `${quotation.number} · ${plan.name}`);
-    }
-    notify();
   },
 
   addRecommendation(quotationId: string, productId: string) {

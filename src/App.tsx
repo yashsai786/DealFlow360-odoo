@@ -14,12 +14,17 @@ import { CustomerPortalView } from "./features/portal/CustomerPortalView";
 import { ProfileView } from "./features/profile/ProfileView";
 import { AuthView } from "./features/auth/AuthView";
 import { Toaster } from "./components/ui/sonner";
-import { useAppState } from "./infrastructure/store";
+import { useAppState, identityActions } from "./infrastructure/store";
 
 export default function App() {
   const state = useAppState();
   const session = state.session;
   const isCustomer = session?.role === "CUSTOMER";
+
+  // Hydrate DB state on startup
+  useEffect(() => {
+    identityActions.syncWithDatabase();
+  }, []);
 
   const [currentTab, setCurrentTab] = useState<NavTab>(
     isCustomer ? "portal" : "dashboard",

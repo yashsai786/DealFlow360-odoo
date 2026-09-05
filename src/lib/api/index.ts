@@ -1,5 +1,15 @@
 import { apiClient } from "./client";
-import type { User, Product, Warehouse, SubscriptionPlan } from "../../modules/shared/types";
+import type {
+  User,
+  Product,
+  Warehouse,
+  SubscriptionPlan,
+  Quotation,
+  DiscountEvaluation,
+  Approval,
+  Invoice,
+  FulfillmentOrder,
+} from "../../modules/shared/types";
 import type { GovernanceConfig } from "../../modules/discount-governance/service";
 
 /* ------------------------------------------------ AUTH API CLIENT */
@@ -72,3 +82,64 @@ export const governanceApi = {
       body: JSON.stringify(config),
     }),
 };
+
+/* ------------------------------------------- QUOTATIONS API CLIENT */
+export const quotationsApi = {
+  list: (params?: { search?: string; stage?: string; customerId?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.search) query.set("search", params.search);
+    if (params?.stage && params.stage !== "all") query.set("stage", params.stage);
+    if (params?.customerId) query.set("customerId", params.customerId);
+    const qs = query.toString();
+    return apiClient<Quotation[]>(`/api/quotations${qs ? `?${qs}` : ""}`);
+  },
+  getById: (id: string) => apiClient<Quotation>(`/api/quotations/${id}`),
+  create: (customerId: string) =>
+    apiClient<Quotation>("/api/quotations", {
+      method: "POST",
+      body: JSON.stringify({ customerId }),
+    }),
+  update: (id: string, patch: Partial<Quotation>) =>
+    apiClient<Quotation>(`/api/quotations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  addLine: (
+    id: string,
+    line: { productId: string; qty: number; unitPrice?: number; discountPct?: number }
+  ) =>
+    apiClient<Quotation>(`/api/quotations/${id}/lines`, {
+      method: "POST",
+      body: JSON.stringify(line),
+    }),
+  updateLine: (
+    id: string,
+    lineId: string,
+    patch: { qty?: number; unitPrice?: number; discountPct?: number }
+  ) =>
+    apiClient<Quotation>(`/api/quotations/${id}/lines/${lineId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  removeLine: (id: string, lineId: string) =>
+    apiClient<Quotation>(`/api/quotations/${id}/lines/${lineId}`, {
+      method: "DELETE",
+    }),
+  submit: (id: string) =>
+    apiClient<{
+      quotation: Quotation;
+      autoApproved: boolean;
+      evaluation: DiscountEvaluation;
+      approval?: Approval;
+    }>(`/api/quotations/${id}/submit`, {
+      method: "POST",
+    }),
+  confirm: (id: string) =>
+    apiClient<{ quotation: Quotation; invoice?: Invoice; fulfillmentOrder?: FulfillmentOrder }>(
+      `/api/quotations/${id}/confirm`,
+      {
+        method: "POST",
+      }
+    ),
+};
+
