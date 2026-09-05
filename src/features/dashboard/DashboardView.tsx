@@ -4,6 +4,7 @@ import {
   productMap,
   totalsOf,
   customerMap,
+  quotationActions,
 } from "../../infrastructure/store";
 import { stageLabel } from "../../modules/quotations/service";
 import { calculateDealHealth } from "../../modules/deal-intelligence/service";
@@ -19,7 +20,10 @@ import {
   PackageCheck,
   CheckCircle2,
   TrendingUp,
+  BellRing,
+  Flame,
 } from "lucide-react";
+import { toast } from "sonner";
 
 interface DashboardViewProps {
   onNavigate: (tab: any, extraId?: string) => void;
@@ -55,6 +59,24 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
     orders: state.orders,
     approvals: state.approvals,
   });
+
+  const handleNudge = (quotationId: string) => {
+    try {
+      quotationActions.nudge(quotationId);
+      toast.success("Sales rep nudged! Notification recorded on deal.");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to nudge");
+    }
+  };
+
+  const handleEscalate = (quotationId: string) => {
+    try {
+      quotationActions.escalate(quotationId);
+      toast.warning("Deal escalated to manager review queue!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to escalate");
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -235,36 +257,74 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
             </Button>
           </CardHeader>
           <CardContent className="p-3 flex-1 divide-y divide-border">
-            {dealAlerts.slice(0, 4).map((a) => (
-              <div key={a.id} className="py-2.5 first:pt-0 last:pb-0 space-y-1">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-foreground">{a.issue}</span>
-                  <Badge
-                    variant={
-                      a.severity === "Critical"
-                        ? "destructive"
-                        : a.severity === "At Risk"
-                          ? "secondary"
-                          : "outline"
-                    }
-                    className="text-[10px] py-0 px-1"
-                  >
-                    {a.severity}
-                  </Badge>
+            {dealAlerts.slice(0, 4).map((a) => {
+              const q = state.quotations.find((x) => x.id === a.quotationId);
+              return (
+                <div key={a.id} className="py-2.5 first:pt-0 last:pb-0 space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-foreground">{a.issue}</span>
+                    <Badge
+                      variant={
+                        a.severity === "Critical"
+                          ? "destructive"
+                          : a.severity === "At Risk"
+                            ? "secondary"
+                            : "outline"
+                      }
+                      className="text-[10px] py-0 px-1"
+                    >
+                      {a.severity}
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">{a.detail}</p>
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono font-bold text-primary">{a.quotationNumber}</span>
+                      {q?.nudgedAt && (
+                        <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-amber-600 border-amber-400">
+                          Nudged
+                        </Badge>
+                      )}
+                      {q?.escalated && (
+                        <Badge variant="destructive" className="text-[9px] py-0 px-1 uppercase font-mono">
+                          Escalated
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleNudge(a.quotationId)}
+                        className="h-5 px-1.5 text-[10px] text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                        title="Nudge Sales Representative"
+                      >
+                        <BellRing className="h-2.5 w-2.5 mr-0.5" />
+                        Nudge
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEscalate(a.quotationId)}
+                        className="h-5 px-1.5 text-[10px] text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                        title="Escalate Deal"
+                      >
+                        <Flame className="h-2.5 w-2.5 mr-0.5" />
+                        Escalate
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onNavigate("quotation-builder", a.quotationId)}
+                        className="h-5 px-1.5 text-[10px] text-primary"
+                      >
+                        Resolve &rarr;
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-[11px] text-muted-foreground">{a.detail}</p>
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-[10px] font-mono text-muted-foreground">{a.quotationNumber}</span>
-                  <button
-                    type="button"
-                    onClick={() => onNavigate("quotation-builder", a.quotationId)}
-                    className="text-[10px] text-primary hover:underline font-medium"
-                  >
-                    Resolve Deal &rarr;
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {dealAlerts.length === 0 && (
               <p className="text-xs text-muted-foreground py-6 text-center">All deals healthy.</p>
             )}

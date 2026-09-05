@@ -32,6 +32,8 @@ export function DealHealthView({ onOpenQuote }: DealHealthViewProps) {
   const customers = customerMap(state);
   const users = Object.fromEntries(state.users.map((u) => [u.id, u]));
 
+  const [stallDays, setStallDays] = React.useState<number>(7);
+
   const alerts = calculateDealHealth({
     quotations: state.quotations,
     products,
@@ -39,6 +41,7 @@ export function DealHealthView({ onOpenQuote }: DealHealthViewProps) {
     users,
     orders: state.orders,
     approvals: state.approvals,
+    stallDaysThreshold: stallDays,
   });
 
   const repBaselines = repDiscountAverages(state.quotations, products);
@@ -67,11 +70,38 @@ export function DealHealthView({ onOpenQuote }: DealHealthViewProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Deal Health & Autonomous Intelligence</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Self-governing anomaly detection, stalled pipeline diagnostics, and automated manager intervention.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Deal Health & Autonomous Intelligence</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Self-governing anomaly detection, stalled pipeline diagnostics, and automated manager intervention.
+          </p>
+        </div>
+
+        {/* Configurable Stall Inactivity Threshold */}
+        <div className="flex items-center gap-2 bg-card border border-border px-3 py-1.5 rounded-lg shadow-xs">
+          <Clock className="h-4 w-4 text-primary" />
+          <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Stall Threshold:</span>
+          <div className="flex items-center gap-1">
+            {[3, 5, 7, 14].map((days) => (
+              <button
+                key={days}
+                type="button"
+                onClick={() => {
+                  setStallDays(days);
+                  toast.info(`Stall threshold configured to ${days} days.`);
+                }}
+                className={`text-xs px-2 py-0.5 rounded font-mono transition-colors ${
+                  stallDays === days
+                    ? "bg-primary text-primary-foreground font-bold shadow-xs"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                }`}
+              >
+                {days}d
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Health Overview Cards */}
