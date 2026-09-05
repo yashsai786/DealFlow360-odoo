@@ -64,6 +64,7 @@ export interface IQuotationRepository {
   create(quotation: Quotation): Promise<Quotation>;
   update(id: string, patch: Partial<Quotation>): Promise<Quotation>;
   delete(id: string): Promise<void>;
+  deleteMany(ids: string[]): Promise<number>;
   getNextSequence(): Promise<number>;
 }
 

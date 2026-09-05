@@ -23,6 +23,14 @@ import {
   TableRow,
 } from "../../components/ui/table";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -175,6 +183,23 @@ export function QuotationBuilderView({
   };
 
   const [orderDiscount, setOrderDiscount] = useState<string>("");
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteDraft = async () => {
+    if (!quotation || quotation.stage !== "DRAFT") return;
+    setIsDeleting(true);
+    try {
+      await quotationActions.delete(quotation.id);
+      toast.success(`Draft quotation ${quotation.number} deleted`);
+      onBack();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to delete draft quotation");
+    } finally {
+      setIsDeleting(false);
+      setConfirmDeleteOpen(false);
+    }
+  };
 
   const handleApplyOrderDiscount = async () => {
     if (!quotation || quotation.lines.length === 0) return;
@@ -267,6 +292,18 @@ export function QuotationBuilderView({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
+          {quotation.stage === "DRAFT" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setConfirmDeleteOpen(true)}
+              className="h-8 text-xs font-medium text-destructive hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+              Delete Draft
+            </Button>
+          )}
+
           {["DRAFT", "APPROVED", "NEGOTIATION"].includes(quotation.stage) && (
             <Button
               size="sm"
@@ -701,6 +738,43 @@ export function QuotationBuilderView({
           </Card>
         </div>
       </div>
+
+      {/* Delete Draft Confirmation Dialog */}
+      <Dialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2 text-destructive">
+              <Trash2 className="h-4 w-4" />
+              Delete Draft Quotation
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Are you sure you want to permanently delete draft deal{" "}
+              <strong className="text-foreground">{quotation?.number}</strong>? All line items will
+              be purged from SQLite. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="pt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmDeleteOpen(false)}
+              disabled={isDeleting}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDeleteDraft}
+              disabled={isDeleting}
+              className="text-xs"
+            >
+              {isDeleting ? "Deleting..." : "Delete Draft"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

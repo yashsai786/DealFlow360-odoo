@@ -152,6 +152,15 @@ export const quotationsApi = {
         method: "POST",
       }
     ),
+  delete: (id: string) =>
+    apiClient<{ id: string; deleted: boolean }>(`/api/quotations/${id}`, {
+      method: "DELETE",
+    }),
+  bulkDelete: (ids: string[]) =>
+    apiClient<{ deletedCount: number; deletedIds: string[] }>("/api/quotations/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
 };
 
 /* -------------------------------------------- APPROVALS API CLIENT */

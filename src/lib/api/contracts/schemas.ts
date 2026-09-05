@@ -145,6 +145,10 @@ export const UpdateQuotationLineSchema = z.object({
   discountPct: z.number().min(0).max(100).optional(),
 });
 
+export const BulkDeleteQuotationsSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1, "At least one quotation ID must be provided"),
+});
+
 /* ---------------------------------- DISCOUNT GOVERNANCE SCHEMAS */
 export const EvaluateLineDiscountSchema = z.object({
   tier: z.enum(["Bronze", "Silver", "Gold"]),

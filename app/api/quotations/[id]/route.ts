@@ -56,3 +56,23 @@ export async function PATCH(req: Request, context: RouteContext) {
     return apiError("QUOTATION_UPDATE_ERROR", err?.message || "Failed to update quotation", status);
   }
 }
+
+export async function DELETE(req: Request, context: RouteContext) {
+  try {
+    const actor = await resolveActor(req);
+    const quotationId = context.params.id;
+
+    const result = await quotationApplicationService.delete(quotationId, actor);
+    return apiSuccess(result);
+  } catch (err: any) {
+    const status = err?.message?.includes("Access denied")
+      ? 403
+      : err?.message?.includes("not found")
+      ? 404
+      : err?.message?.includes("Only DRAFT")
+      ? 400
+      : 500;
+    return apiError("QUOTATION_DELETE_ERROR", err?.message || "Failed to delete quotation", status);
+  }
+}
+

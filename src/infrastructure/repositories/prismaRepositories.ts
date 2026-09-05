@@ -516,7 +516,17 @@ export class PrismaQuotationRepository implements IQuotationRepository {
   }
 
   async delete(id: string): Promise<void> {
+    await prisma.approval.deleteMany({ where: { quotationId: id } });
     await prisma.quotation.delete({ where: { id } });
+  }
+
+  async deleteMany(ids: string[]): Promise<number> {
+    if (!ids || ids.length === 0) return 0;
+    await prisma.approval.deleteMany({ where: { quotationId: { in: ids } } });
+    const result = await prisma.quotation.deleteMany({
+      where: { id: { in: ids } },
+    });
+    return result.count;
   }
 
   async getNextSequence(): Promise<number> {

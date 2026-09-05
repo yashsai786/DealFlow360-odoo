@@ -530,6 +530,49 @@ export const quotationActions = {
     }
   },
 
+  async delete(quotationId: string) {
+    const user = requireSession();
+    assertCan(user.role, "quotation.edit");
+    const quote = state.quotations.find((q) => q.id === quotationId);
+    if (!quote) return;
+    try {
+      await quotationsApi.delete(quotationId);
+      state = {
+        ...state,
+        quotations: state.quotations.filter((q) => q.id !== quotationId),
+        approvals: state.approvals.filter((a) => a.quotationId !== quotationId),
+      };
+      record("Draft quotation deleted", "Quotation", quotationId);
+      emit("QuotationDraftDeleted", quote.number);
+      notify();
+    } catch (err: any) {
+      console.error("[QuotationActions] delete error:", err);
+      throw err;
+    }
+  },
+
+  async bulkDelete(quotationIds: string[]) {
+    const user = requireSession();
+    assertCan(user.role, "quotation.edit");
+    if (!quotationIds || quotationIds.length === 0) return { deletedCount: 0, deletedIds: [] };
+    try {
+      const res = await quotationsApi.bulkDelete(quotationIds);
+      const deletedSet = new Set(res.deletedIds);
+      state = {
+        ...state,
+        quotations: state.quotations.filter((q) => !deletedSet.has(q.id)),
+        approvals: state.approvals.filter((a) => !deletedSet.has(a.quotationId)),
+      };
+      record(`Bulk deleted ${res.deletedCount} draft quotations`, "Quotation", "bulk");
+      emit("QuotationDraftDeleted", `${res.deletedCount} drafts`);
+      notify();
+      return res;
+    } catch (err: any) {
+      console.error("[QuotationActions] bulkDelete error:", err);
+      throw err;
+    }
+  },
+
   addRecommendation(quotationId: string, productId: string) {
     const quotation = state.quotations.find((q) => q.id === quotationId);
     const product = state.products.find((p) => p.id === productId);

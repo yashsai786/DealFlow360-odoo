@@ -404,6 +404,93 @@ export class QuotationApplicationService {
 
     return { quotation: updated, invoice, fulfillmentOrder };
   }
+
+  async delete(id: string, actor: User): Promise<{ id: string; deleted: boolean }> {
+    assertCan(actor.role, "quotation.edit");
+    const quotation = await quotationRepository.findById(id);
+    if (!quotation) {
+      throw new Error(`Quotation '${id}' not found`);
+    }
+
+    if (actor.role === "CUSTOMER" && quotation.customerId !== actor.customerId) {
+      throw new Error("Access denied: You do not have permission to delete this quotation.");
+    }
+
+    if (quotation.stage !== "DRAFT") {
+      throw new Error(
+        `Cannot delete quotation in stage '${quotation.stage}'. Only DRAFT quotations can be deleted.`
+      );
+    }
+
+    await quotationRepository.delete(id);
+
+    await auditRepository.record({
+      id: uid("au"),
+      entity: "Quotation",
+      entityId: id,
+      actor: actor.name,
+      action: "Draft quotation deleted",
+      at: now(),
+    });
+
+    await domainEventRepository.emit({
+      id: uid("e"),
+      name: "QuotationDraftDeleted",
+      payload: quotation.number,
+      at: now(),
+    });
+
+    return { id, deleted: true };
+  }
+
+  async deleteMany(
+    ids: string[],
+    actor: User
+  ): Promise<{ deletedCount: number; deletedIds: string[] }> {
+    assertCan(actor.role, "quotation.edit");
+    if (!ids || ids.length === 0) {
+      return { deletedCount: 0, deletedIds: [] };
+    }
+
+    const allTarget = await Promise.all(ids.map((id) => quotationRepository.findById(id)));
+    const existing = allTarget.filter((q): q is Quotation => q !== null);
+
+    for (const q of existing) {
+      if (actor.role === "CUSTOMER" && q.customerId !== actor.customerId) {
+        throw new Error("Access denied: You can only delete your own draft quotations.");
+      }
+      if (q.stage !== "DRAFT") {
+        throw new Error(
+          `Quotation '${q.number}' is in stage '${q.stage}'. Only DRAFT quotations can be deleted.`
+        );
+      }
+    }
+
+    const validIds = existing.map((q) => q.id);
+    const deletedCount = await quotationRepository.deleteMany(validIds);
+
+    await auditRepository.record({
+      id: uid("au"),
+      entity: "Quotation",
+      entityId: "bulk-delete",
+      actor: actor.name,
+      action: `Bulk deleted ${deletedCount} draft quotations`,
+      reason: existing.map((q) => q.number).join(", "),
+      at: now(),
+    });
+
+    for (const q of existing) {
+      await domainEventRepository.emit({
+        id: uid("e"),
+        name: "QuotationDraftDeleted",
+        payload: q.number,
+        at: now(),
+      });
+    }
+
+    return { deletedCount, deletedIds: validIds };
+  }
 }
 
 export const quotationApplicationService = new QuotationApplicationService();
+

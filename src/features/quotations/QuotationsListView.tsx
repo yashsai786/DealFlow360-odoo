@@ -3,9 +3,10 @@ import {
   useAppState,
   totalsOf,
   customerMap,
+  quotationActions,
 } from "../../infrastructure/store";
 import { stageLabel } from "../../modules/quotations/service";
-import type { QuotationStage } from "../../modules/shared/types";
+import type { Quotation, QuotationStage } from "../../modules/shared/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -26,6 +27,14 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog";
+import {
   FileText,
   Plus,
   Search,
@@ -34,7 +43,9 @@ import {
   Kanban,
   Building2,
   TrendingUp,
+  Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 
 interface QuotationsListViewProps {
   initialView?: "list" | "pipeline";
@@ -62,11 +73,67 @@ export function QuotationsListView({
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
 
+  const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(new Set());
+  const [singleDeleteTarget, setSingleDeleteTarget] = useState<Quotation | null>(null);
+  const [confirmBulkDeleteOpen, setConfirmBulkDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   useEffect(() => {
     if (initialView) {
       setViewMode(initialView);
     }
   }, [initialView]);
+
+  const toggleSelectDraft = (id: string) => {
+    const next = new Set(selectedDraftIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedDraftIds(next);
+  };
+
+  const toggleSelectAll = (quotes: Quotation[]) => {
+    const draftQuotes = quotes.filter((q) => q.stage === "DRAFT");
+    if (draftQuotes.every((q) => selectedDraftIds.has(q.id))) {
+      setSelectedDraftIds(new Set());
+    } else {
+      setSelectedDraftIds(new Set(draftQuotes.map((q) => q.id)));
+    }
+  };
+
+  const handleConfirmSingleDelete = async () => {
+    if (!singleDeleteTarget) return;
+    setIsDeleting(true);
+    try {
+      await quotationActions.delete(singleDeleteTarget.id);
+      toast.success(`Draft quotation ${singleDeleteTarget.number} deleted`);
+      setSelectedDraftIds((prev) => {
+        const next = new Set(prev);
+        next.delete(singleDeleteTarget.id);
+        return next;
+      });
+      setSingleDeleteTarget(null);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to delete quotation");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    if (selectedDraftIds.size === 0) return;
+    setIsDeleting(true);
+    try {
+      const ids = Array.from(selectedDraftIds);
+      const res = await quotationActions.bulkDelete(ids);
+      toast.success(`Successfully deleted ${res?.deletedCount ?? ids.length} draft quotation(s)`);
+      setSelectedDraftIds(new Set());
+      setConfirmBulkDeleteOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to bulk delete quotations");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const filteredQuotes = state.quotations.filter((q) => {
     const cust = customers[q.customerId];
@@ -137,7 +204,13 @@ export function QuotationsListView({
           </div>
           {viewMode === "list" && (
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <Select value={stageFilter} onValueChange={setStageFilter}>
+              <Select
+                value={stageFilter}
+                onValueChange={(val) => {
+                  setStageFilter(val);
+                  setSelectedDraftIds(new Set());
+                }}
+              >
                 <SelectTrigger className="h-8 text-xs w-full sm:w-48">
                   <SelectValue placeholder="Filter by stage" />
                 </SelectTrigger>
@@ -153,6 +226,19 @@ export function QuotationsListView({
                   <SelectItem value="PAID" className="text-xs">Paid</SelectItem>
                 </SelectContent>
               </Select>
+
+              {stageFilter === "DRAFT" && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={selectedDraftIds.size === 0 || isDeleting}
+                  onClick={() => setConfirmBulkDeleteOpen(true)}
+                  className="h-8 text-xs whitespace-nowrap shadow-xs"
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1" />
+                  Delete Selected ({selectedDraftIds.size})
+                </Button>
+              )}
             </div>
           )}
         </CardContent>
@@ -249,9 +335,25 @@ export function QuotationsListView({
 
                         <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1">
                           <span>{q.lines.length} items</span>
-                          <span className="flex items-center gap-0.5 text-primary text-[10px]">
-                            Open Builder <ArrowUpRight className="h-3 w-3" />
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {q.stage === "DRAFT" && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 text-muted-foreground hover:text-destructive p-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSingleDeleteTarget(q);
+                                }}
+                                title="Delete Draft Quotation"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            )}
+                            <span className="flex items-center gap-0.5 text-primary text-[10px]">
+                              Open Builder <ArrowUpRight className="h-3 w-3" />
+                            </span>
+                          </div>
                         </div>
                       </Card>
                     );
@@ -284,6 +386,20 @@ export function QuotationsListView({
             <Table>
               <TableHeader>
                 <TableRow className="text-[11px]">
+                  {stageFilter === "DRAFT" && (
+                    <TableHead className="w-8">
+                      <input
+                        type="checkbox"
+                        checked={
+                          filteredQuotes.length > 0 &&
+                          filteredQuotes.every((q) => selectedDraftIds.has(q.id))
+                        }
+                        onChange={() => toggleSelectAll(filteredQuotes)}
+                        className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer"
+                        title="Select all visible drafts"
+                      />
+                    </TableHead>
+                  )}
                   <TableHead>Quotation #</TableHead>
                   <TableHead>Customer Account</TableHead>
                   <TableHead>Owner</TableHead>
@@ -293,7 +409,7 @@ export function QuotationsListView({
                   <TableHead className="text-right">Discount</TableHead>
                   <TableHead className="text-right">Net Total</TableHead>
                   <TableHead className="text-right">Margin</TableHead>
-                  <TableHead className="w-10"></TableHead>
+                  <TableHead className="w-16 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody className="text-xs">
@@ -301,13 +417,26 @@ export function QuotationsListView({
                   const cust = customers[q.customerId];
                   const totals = totalsOf(state, q);
                   const owner = state.users.find((u) => u.id === q.ownerId);
+                  const isDraft = q.stage === "DRAFT";
 
                   return (
                     <TableRow
                       key={q.id}
                       onClick={() => onSelectQuote(q.id)}
-                      className="cursor-pointer hover:bg-muted/40 transition-colors"
+                      className={`cursor-pointer hover:bg-muted/40 transition-colors ${
+                        selectedDraftIds.has(q.id) ? "bg-primary/5" : ""
+                      }`}
                     >
+                      {stageFilter === "DRAFT" && (
+                        <TableCell onClick={(e) => e.stopPropagation()} className="w-8">
+                          <input
+                            type="checkbox"
+                            checked={selectedDraftIds.has(q.id)}
+                            onChange={() => toggleSelectDraft(q.id)}
+                            className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer"
+                          />
+                        </TableCell>
+                      )}
                       <TableCell className="font-mono font-semibold text-primary">
                         {q.number}
                       </TableCell>
@@ -354,15 +483,36 @@ export function QuotationsListView({
                           {totals.marginPct}%
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground opacity-60" />
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1">
+                          {isDraft && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-destructive p-0"
+                              onClick={() => setSingleDeleteTarget(q)}
+                              title="Delete Draft Quotation"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-muted-foreground hover:text-primary p-0"
+                            onClick={() => onSelectQuote(q.id)}
+                            title="Open Builder"
+                          >
+                            <ArrowUpRight className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
                 })}
                 {filteredQuotes.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-xs">
+                    <TableCell colSpan={stageFilter === "DRAFT" ? 11 : 10} className="text-center py-8 text-muted-foreground text-xs">
                       No quotations matching query.
                     </TableCell>
                   </TableRow>
@@ -372,6 +522,86 @@ export function QuotationsListView({
           </CardContent>
         </Card>
       )}
+
+      {/* Single Delete Confirmation Dialog */}
+      <Dialog
+        open={Boolean(singleDeleteTarget)}
+        onOpenChange={(open) => !open && setSingleDeleteTarget(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2 text-destructive">
+              <Trash2 className="h-4 w-4" />
+              Delete Draft Quotation
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Are you sure you want to delete draft{" "}
+              <strong className="text-foreground">{singleDeleteTarget?.number}</strong>? This will
+              permanently remove the deal from SQLite. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="pt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSingleDeleteTarget(null)}
+              disabled={isDeleting}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleConfirmSingleDelete}
+              disabled={isDeleting}
+              className="text-xs"
+            >
+              {isDeleting ? "Deleting..." : "Delete Draft"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <Dialog
+        open={confirmBulkDeleteOpen}
+        onOpenChange={(open) => !open && setConfirmBulkDeleteOpen(false)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2 text-destructive">
+              <Trash2 className="h-4 w-4" />
+              Delete Selected Draft Quotations
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Are you sure you want to permanently delete{" "}
+              <strong className="text-foreground">{selectedDraftIds.size}</strong> selected draft
+              quotation(s)? All associated draft records will be permanently removed from SQLite.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="pt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmBulkDeleteOpen(false)}
+              disabled={isDeleting}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleConfirmBulkDelete}
+              disabled={isDeleting}
+              className="text-xs"
+            >
+              {isDeleting ? "Deleting..." : `Delete ${selectedDraftIds.size} Drafts`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
