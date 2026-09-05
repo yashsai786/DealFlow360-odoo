@@ -157,10 +157,11 @@ export class PrismaAuditRepository implements IAuditRepository {
     };
   }
 
-  async list(filter?: { entity?: string; actor?: string }): Promise<AuditEntry[]> {
+  async list(filter?: { entity?: string; entityId?: string; actor?: string }): Promise<AuditEntry[]> {
     const rows = await prisma.auditEntry.findMany({
       where: {
         ...(filter?.entity ? { entity: filter.entity } : {}),
+        ...(filter?.entityId ? { entityId: filter.entityId } : {}),
         ...(filter?.actor ? { actor: filter.actor } : {}),
       },
       orderBy: { createdAt: "desc" },

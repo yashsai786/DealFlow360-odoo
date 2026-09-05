@@ -60,7 +60,7 @@ import {
   InvalidStateTransition,
   SubscriptionModificationInvalid,
 } from "../lib/errors";
-import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, subscriptionsApi, approvalsApi, recommendationsApi, fulfillmentApi } from "../lib/api";
+import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, subscriptionsApi, approvalsApi, recommendationsApi, fulfillmentApi, auditApi } from "../lib/api";
 
 export interface AppState {
   session: User | null;
@@ -399,6 +399,12 @@ export const identityActions = {
       const dbOrders = await fulfillmentApi.list();
       if (dbOrders && dbOrders.length > 0) {
         set({ orders: dbOrders });
+      }
+
+      // Sync audit trail — DB is authoritative
+      const dbAudit = await auditApi.list();
+      if (dbAudit && dbAudit.length > 0) {
+        set({ audit: dbAudit });
       }
     } catch (error) {
       console.error("[DealFlow360] syncWithDatabase failed:", error);

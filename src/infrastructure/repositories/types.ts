@@ -26,7 +26,7 @@ export interface IUserRepository {
 
 export interface IAuditRepository {
   record(entry: AuditEntry): Promise<AuditEntry>;
-  list(filter?: { entity?: string; actor?: string }): Promise<AuditEntry[]>;
+  list(filter?: { entity?: string; entityId?: string; actor?: string }): Promise<AuditEntry[]>;
 }
 
 export interface IDomainEventRepository {

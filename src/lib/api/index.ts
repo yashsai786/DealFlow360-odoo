@@ -12,6 +12,7 @@ import type {
   Invoice,
   FulfillmentOrder,
   Recommendation,
+  AuditEntry,
 } from "../../modules/shared/types";
 import type { GovernanceConfig } from "../../modules/discount-governance/service";
 import type { UpsellConfig } from "../../modules/recommendations/service";
@@ -319,4 +320,17 @@ export const approvalsApi = {
       body: JSON.stringify({ decision, reason }),
     }),
 };
+
+/* ----------------------------------------------- AUDIT API CLIENT */
+export const auditApi = {
+  list: (params?: { entity?: string; entityId?: string; actor?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.entity) query.set("entity", params.entity);
+    if (params?.entityId) query.set("entityId", params.entityId);
+    if (params?.actor) query.set("actor", params.actor);
+    const qs = query.toString();
+    return apiClient<AuditEntry[]>(`/api/audit${qs ? `?${qs}` : ""}`);
+  },
+};
+
 
