@@ -1,5 +1,6 @@
 import { apiClient } from "./client";
-import type { User, Product } from "../../modules/shared/types";
+import type { User, Product, Warehouse, SubscriptionPlan } from "../../modules/shared/types";
+import type { GovernanceConfig } from "../../modules/discount-governance/service";
 
 /* ------------------------------------------------ AUTH API CLIENT */
 export const authApi = {
@@ -39,5 +40,35 @@ export const productsApi = {
     apiClient<Product>("/api/products", {
       method: "POST",
       body: JSON.stringify(product),
+    }),
+};
+
+/* ----------------------------------------------- WAREHOUSES API CLIENT */
+export const warehousesApi = {
+  list: () => apiClient<Warehouse[]>("/api/warehouses"),
+  update: (warehouse: Warehouse) =>
+    apiClient<Warehouse>("/api/warehouses", {
+      method: "PATCH",
+      body: JSON.stringify(warehouse),
+    }),
+};
+
+/* ---------------------------------------------- PLANS API CLIENT */
+export const plansApi = {
+  list: () => apiClient<SubscriptionPlan[]>("/api/plans"),
+  update: (plan: SubscriptionPlan) =>
+    apiClient<SubscriptionPlan>("/api/plans", {
+      method: "PATCH",
+      body: JSON.stringify(plan),
+    }),
+};
+
+/* ------------------------------------------- GOVERNANCE API CLIENT */
+export const governanceApi = {
+  load: () => apiClient<GovernanceConfig>("/api/governance"),
+  save: (config: GovernanceConfig) =>
+    apiClient<GovernanceConfig>("/api/governance", {
+      method: "PUT",
+      body: JSON.stringify(config),
     }),
 };

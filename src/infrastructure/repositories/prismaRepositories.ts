@@ -4,6 +4,9 @@ import type {
   IAuditRepository,
   IDomainEventRepository,
   IProductRepository,
+  IWarehouseRepository,
+  ISubscriptionPlanRepository,
+  IGovernanceRepository,
 } from "./types";
 import type {
   User,
@@ -13,7 +16,13 @@ import type {
   Product,
   ProductCategory,
   BillingCycle,
+  Warehouse,
+  SubscriptionPlan,
 } from "../../modules/shared/types";
+import {
+  DEFAULT_CONFIG,
+  type GovernanceConfig,
+} from "../../modules/discount-governance/service";
 
 /* ------------------------------------------------ USER REPOSITORY */
 export class PrismaUserRepository implements IUserRepository {
@@ -227,3 +236,79 @@ export class PrismaProductRepository implements IProductRepository {
 }
 
 export const productRepository = new PrismaProductRepository();
+
+/* ------------------------------------------ WAREHOUSE REPOSITORY */
+export class PrismaWarehouseRepository implements IWarehouseRepository {
+  async list(): Promise<Warehouse[]> {
+    const rows = await prisma.warehouse.findMany();
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      location: r.location,
+      shipmentCost: r.shipmentCost,
+    }));
+  }
+
+  async update(warehouse: Warehouse): Promise<Warehouse> {
+    const row = await prisma.warehouse.update({
+      where: { id: warehouse.id },
+      data: {
+        name: warehouse.name,
+        location: warehouse.location,
+        shipmentCost: warehouse.shipmentCost,
+      },
+    });
+    return { id: row.id, name: row.name, location: row.location, shipmentCost: row.shipmentCost };
+  }
+}
+
+/* ------------------------------------- SUBSCRIPTION PLAN REPOSITORY */
+export class PrismaSubscriptionPlanRepository implements ISubscriptionPlanRepository {
+  async list(): Promise<SubscriptionPlan[]> {
+    const rows = await prisma.subscriptionPlan.findMany();
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      cycle: r.cycle as BillingCycle,
+      price: r.price,
+      prorationEnabled: r.prorationEnabled,
+      cancellationPolicy: r.cancellationPolicy,
+    }));
+  }
+
+  async update(plan: SubscriptionPlan): Promise<SubscriptionPlan> {
+    const row = await prisma.subscriptionPlan.update({
+      where: { id: plan.id },
+      data: { price: plan.price, prorationEnabled: plan.prorationEnabled, cancellationPolicy: plan.cancellationPolicy },
+    });
+    return {
+      id: row.id,
+      name: row.name,
+      cycle: row.cycle as BillingCycle,
+      price: row.price,
+      prorationEnabled: row.prorationEnabled,
+      cancellationPolicy: row.cancellationPolicy,
+    };
+  }
+}
+
+/* --------------------------------------- GOVERNANCE REPOSITORY */
+export class PrismaGovernanceRepository implements IGovernanceRepository {
+  async load(): Promise<GovernanceConfig> {
+    const row = await prisma.governanceConfig.findUnique({ where: { id: "default" } });
+    if (!row) return DEFAULT_CONFIG;
+    return JSON.parse(row.config) as GovernanceConfig;
+  }
+
+  async save(config: GovernanceConfig): Promise<void> {
+    await prisma.governanceConfig.upsert({
+      where: { id: "default" },
+      update: { config: JSON.stringify(config) },
+      create: { id: "default", config: JSON.stringify(config) },
+    });
+  }
+}
+
+export const warehouseRepository = new PrismaWarehouseRepository();
+export const subscriptionPlanRepository = new PrismaSubscriptionPlanRepository();
+export const governanceRepository = new PrismaGovernanceRepository();

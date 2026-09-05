@@ -45,6 +45,21 @@ model Warehouse {
   shipmentCost Float
 }
 
+model SubscriptionPlan {
+  id                 String  @id
+  name               String
+  cycle              String
+  price              Float
+  prorationEnabled   Boolean @default(true)
+  cancellationPolicy String
+}
+
+// Stores governance ceiling overrides as a single JSON row (id = "default")
+model GovernanceConfig {
+  id       String @id @default("default")
+  config   String // JSON: { tierCeilings, categoryCeilings }
+}
+
 model InventoryItem {
   id                String @id
   warehouseId       String

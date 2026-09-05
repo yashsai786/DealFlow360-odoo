@@ -3,7 +3,10 @@ import type {
   AuditEntry,
   DomainEvent,
   Product,
+  Warehouse,
+  SubscriptionPlan,
 } from "../../modules/shared/types";
+import type { GovernanceConfig } from "../../modules/discount-governance/service";
 
 export interface IUserRepository {
   findById(id: string): Promise<User | null>;
@@ -26,4 +29,19 @@ export interface IDomainEventRepository {
 export interface IProductRepository {
   list(): Promise<Product[]>;
   upsert(product: Product): Promise<Product>;
+}
+
+export interface IWarehouseRepository {
+  list(): Promise<Warehouse[]>;
+  update(warehouse: Warehouse): Promise<Warehouse>;
+}
+
+export interface ISubscriptionPlanRepository {
+  list(): Promise<SubscriptionPlan[]>;
+  update(plan: SubscriptionPlan): Promise<SubscriptionPlan>;
+}
+
+export interface IGovernanceRepository {
+  load(): Promise<GovernanceConfig>;
+  save(config: GovernanceConfig): Promise<void>;
 }

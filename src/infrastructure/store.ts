@@ -58,7 +58,7 @@ import {
   InvalidStateTransition,
   SubscriptionModificationInvalid,
 } from "../lib/errors";
-import { productsApi, usersApi } from "../lib/api";
+import { productsApi, usersApi, warehousesApi, plansApi, governanceApi } from "../lib/api";
 
 export interface AppState {
   session: User | null;
@@ -323,9 +323,21 @@ export const identityActions = {
       const newUsers = dbUsers.filter((u) => !knownIds.has(u.id));
       if (newUsers.length > 0) set({ users: [...state.users, ...newUsers] });
 
-      // Sync products from DB (DB is authoritative — replaces seed data)
+      // Sync products — DB is authoritative
       const dbProducts = await productsApi.list();
       if (dbProducts.length > 0) set({ products: dbProducts });
+
+      // Sync warehouses — DB is authoritative
+      const dbWarehouses = await warehousesApi.list();
+      if (dbWarehouses.length > 0) set({ warehouses: dbWarehouses });
+
+      // Sync subscription plans — DB is authoritative
+      const dbPlans = await plansApi.list();
+      if (dbPlans.length > 0) set({ plans: dbPlans });
+
+      // Sync governance config — DB is authoritative over seed defaults
+      const dbGovernance = await governanceApi.load();
+      set({ governance: dbGovernance });
     } catch (error) {
       console.error("[DealFlow360] syncWithDatabase failed:", error);
     }
@@ -1088,41 +1100,37 @@ export const adminActions = {
     record(exists ? `Updated ${saved.name}` : `Created ${saved.name}`, "Product", saved.id);
   },
 
-  setTierCeiling(tier: CustomerTier, pct: number) {
+  async setTierCeiling(tier: CustomerTier, pct: number) {
     const user = requireSession();
     assertCan(user.role, "admin.configure");
-    set({
-      governance: {
-        ...state.governance,
-        tierCeilings: { ...state.governance.tierCeilings, [tier]: pct },
-      },
-    });
+    const updated = { ...state.governance, tierCeilings: { ...state.governance.tierCeilings, [tier]: pct } };
+    await governanceApi.save(updated);
+    set({ governance: updated });
     record(`${tier} ceiling set to ${pct}%`, "DiscountRule", tier);
   },
 
-  setCategoryCeiling(category: ProductCategory, pct: number) {
+  async setCategoryCeiling(category: ProductCategory, pct: number) {
     const user = requireSession();
     assertCan(user.role, "admin.configure");
-    set({
-      governance: {
-        ...state.governance,
-        categoryCeilings: { ...state.governance.categoryCeilings, [category]: pct },
-      },
-    });
+    const updated = { ...state.governance, categoryCeilings: { ...state.governance.categoryCeilings, [category]: pct } };
+    await governanceApi.save(updated);
+    set({ governance: updated });
     record(`${category} ceiling set to ${pct}%`, "DiscountRule", category);
   },
 
-  saveWarehouse(warehouse: Warehouse) {
+  async saveWarehouse(warehouse: Warehouse) {
     const user = requireSession();
     assertCan(user.role, "admin.configure");
-    set({ warehouses: state.warehouses.map((w) => (w.id === warehouse.id ? warehouse : w)) });
-    record(`Updated ${warehouse.name}`, "Warehouse", warehouse.id);
+    const saved = await warehousesApi.update(warehouse);
+    set({ warehouses: state.warehouses.map((w) => (w.id === saved.id ? saved : w)) });
+    record(`Updated ${saved.name}`, "Warehouse", saved.id);
   },
 
-  savePlan(plan: SubscriptionPlan) {
+  async savePlan(plan: SubscriptionPlan) {
     const user = requireSession();
     assertCan(user.role, "admin.configure");
-    set({ plans: state.plans.map((p) => (p.id === plan.id ? plan : p)) });
-    record(`Updated ${plan.name}`, "SubscriptionPlan", plan.id);
+    const saved = await plansApi.update(plan);
+    set({ plans: state.plans.map((p) => (p.id === saved.id ? saved : p)) });
+    record(`Updated ${saved.name}`, "SubscriptionPlan", saved.id);
   },
 };

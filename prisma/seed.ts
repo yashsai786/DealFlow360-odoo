@@ -5,6 +5,7 @@ import {
   PRODUCTS,
   WAREHOUSES,
   INVENTORY,
+  PLANS,
   QUOTATIONS,
   APPROVALS,
   ORDERS,
@@ -12,6 +13,7 @@ import {
   INVOICES,
   AUDIT,
 } from "../src/infrastructure/seed";
+import { DEFAULT_CONFIG } from "../src/modules/discount-governance/service";
 
 const prisma = new PrismaClient();
 
@@ -28,6 +30,8 @@ async function main() {
   await prisma.quotation.deleteMany({});
   await prisma.inventoryItem.deleteMany({});
   await prisma.warehouse.deleteMany({});
+  await prisma.subscriptionPlan.deleteMany({});
+  await prisma.governanceConfig.deleteMany({});
   await prisma.product.deleteMany({});
   await prisma.user.deleteMany({});
   await prisma.customer.deleteMany({});
@@ -93,7 +97,28 @@ async function main() {
     });
   }
 
-  // 6. Quotations
+  // 6. Subscription Plans
+  for (const pl of PLANS) {
+    await prisma.subscriptionPlan.create({
+      data: {
+        id: pl.id,
+        name: pl.name,
+        cycle: pl.cycle,
+        price: pl.price,
+        prorationEnabled: pl.prorationEnabled,
+        cancellationPolicy: pl.cancellationPolicy,
+      },
+    });
+  }
+
+  // 7. Governance config (seed with defaults)
+  await prisma.governanceConfig.upsert({
+    where: { id: "default" },
+    update: { config: JSON.stringify(DEFAULT_CONFIG) },
+    create: { id: "default", config: JSON.stringify(DEFAULT_CONFIG) },
+  });
+
+  // 8. Quotations
   for (const q of QUOTATIONS) {
     await prisma.quotation.create({
       data: {
