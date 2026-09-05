@@ -71,7 +71,7 @@ export interface IApprovalRepository {
   findByQuotationId(quotationId: string): Promise<Approval | null>;
   create(approval: Approval): Promise<Approval>;
   update(id: string, patch: Partial<Approval>): Promise<Approval>;
-  list(filter?: { status?: string }): Promise<Approval[]>;
+  list(filter?: { status?: string; quotationId?: string }): Promise<Approval[]>;
 }
 
 export interface IInvoiceRepository {

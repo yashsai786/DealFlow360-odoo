@@ -143,3 +143,29 @@ export const quotationsApi = {
     ),
 };
 
+/* -------------------------------------------- APPROVALS API CLIENT */
+export const approvalsApi = {
+  list: (params?: { status?: string; quotationId?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.status && params.status !== "all") query.set("status", params.status);
+    if (params?.quotationId) query.set("quotationId", params.quotationId);
+    const qs = query.toString();
+    return apiClient<Approval[]>(`/api/approvals${qs ? `?${qs}` : ""}`);
+  },
+  getById: (id: string) => apiClient<Approval>(`/api/approvals/${id}`),
+  decide: (
+    id: string,
+    decision: "APPROVED" | "RETURNED" | "REJECTED" | "APPROVE" | "RETURN" | "REJECT",
+    reason?: string
+  ) =>
+    apiClient<{
+      approval: Approval;
+      quotation: Quotation | null;
+      chainComplete: boolean;
+      nextRole?: string;
+    }>(`/api/approvals/${id}/decide`, {
+      method: "POST",
+      body: JSON.stringify({ decision, reason }),
+    }),
+};
+
