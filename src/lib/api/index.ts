@@ -1,5 +1,5 @@
 import { apiClient } from "./client";
-import type { User } from "../../modules/shared/types";
+import type { User, Product } from "../../modules/shared/types";
 
 /* ------------------------------------------------ AUTH API CLIENT */
 export const authApi = {
@@ -29,5 +29,15 @@ export const usersApi = {
     apiClient<User>("/api/users/profile", {
       method: "PATCH",
       body: JSON.stringify(patch),
+    }),
+};
+
+/* ----------------------------------------------- PRODUCTS API CLIENT */
+export const productsApi = {
+  list: () => apiClient<Product[]>("/api/products"),
+  upsert: (product: Product) =>
+    apiClient<Product>("/api/products", {
+      method: "POST",
+      body: JSON.stringify(product),
     }),
 };

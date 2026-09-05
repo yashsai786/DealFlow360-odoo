@@ -3,12 +3,16 @@ import type {
   IUserRepository,
   IAuditRepository,
   IDomainEventRepository,
+  IProductRepository,
 } from "./types";
 import type {
   User,
   AuditEntry,
   DomainEvent,
   Role,
+  Product,
+  ProductCategory,
+  BillingCycle,
 } from "../../modules/shared/types";
 
 /* ------------------------------------------------ USER REPOSITORY */
@@ -170,3 +174,56 @@ export class PrismaDomainEventRepository implements IDomainEventRepository {
 export const userRepository = new PrismaUserRepository();
 export const auditRepository = new PrismaAuditRepository();
 export const domainEventRepository = new PrismaDomainEventRepository();
+
+/* ------------------------------------------- PRODUCT REPOSITORY */
+export class PrismaProductRepository implements IProductRepository {
+  private toProduct(row: {
+    id: string;
+    name: string;
+    category: string;
+    unit: string;
+    price: number;
+    cost: number;
+    taxPct: number;
+    description: string;
+    cycle: string | null;
+  }): Product {
+    return {
+      id: row.id,
+      name: row.name,
+      category: row.category as ProductCategory,
+      unit: row.unit,
+      price: row.price,
+      cost: row.cost,
+      taxPct: row.taxPct,
+      description: row.description,
+      cycle: row.cycle ? (row.cycle as BillingCycle) : undefined,
+    };
+  }
+
+  async list(): Promise<Product[]> {
+    const rows = await prisma.product.findMany({ orderBy: { createdAt: "asc" } });
+    return rows.map((r) => this.toProduct(r));
+  }
+
+  async upsert(product: Product): Promise<Product> {
+    const data = {
+      name: product.name,
+      category: product.category,
+      unit: product.unit,
+      price: product.price,
+      cost: product.cost,
+      taxPct: product.taxPct,
+      description: product.description,
+      cycle: product.cycle ?? null,
+    };
+    const row = await prisma.product.upsert({
+      where: { id: product.id },
+      update: data,
+      create: { id: product.id, ...data },
+    });
+    return this.toProduct(row);
+  }
+}
+
+export const productRepository = new PrismaProductRepository();

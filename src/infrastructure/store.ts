@@ -58,6 +58,7 @@ import {
   InvalidStateTransition,
   SubscriptionModificationInvalid,
 } from "../lib/errors";
+import { productsApi, usersApi } from "../lib/api";
 
 export interface AppState {
   session: User | null;
@@ -316,18 +317,17 @@ export const identityActions = {
   },
   async syncWithDatabase() {
     try {
-      const response = await fetch("/api/users");
-      if (response.ok) {
-        const dbUsers: User[] = await response.json();
-        // Merge dbUsers with local default state
-        const currentIds = new Set(state.users.map((u) => u.id));
-        const newUsers = dbUsers.filter((u) => !currentIds.has(u.id));
-        if (newUsers.length > 0) {
-          set({ users: [...state.users, ...newUsers] });
-        }
-      }
+      // Sync users from DB (merge new DB-only users into local state)
+      const dbUsers = await usersApi.list();
+      const knownIds = new Set(state.users.map((u) => u.id));
+      const newUsers = dbUsers.filter((u) => !knownIds.has(u.id));
+      if (newUsers.length > 0) set({ users: [...state.users, ...newUsers] });
+
+      // Sync products from DB (DB is authoritative — replaces seed data)
+      const dbProducts = await productsApi.list();
+      if (dbProducts.length > 0) set({ products: dbProducts });
     } catch (error) {
-      console.error("[DealFlow360] Failed to sync users with backend SQLite database", error);
+      console.error("[DealFlow360] syncWithDatabase failed:", error);
     }
   },
   logout() {
@@ -1075,16 +1075,17 @@ export const negotiationActions = {
 /* ------------------------------------------------------------------ admin */
 
 export const adminActions = {
-  saveProduct(product: Product) {
+  async saveProduct(product: Product) {
     const user = requireSession();
     assertCan(user.role, "admin.configure");
-    const exists = state.products.some((p) => p.id === product.id);
+    const saved = await productsApi.upsert(product);
+    const exists = state.products.some((p) => p.id === saved.id);
     set({
       products: exists
-        ? state.products.map((p) => (p.id === product.id ? product : p))
-        : [...state.products, product],
+        ? state.products.map((p) => (p.id === saved.id ? saved : p))
+        : [...state.products, saved],
     });
-    record(exists ? `Updated ${product.name}` : `Created ${product.name}`, "Product", product.id);
+    record(exists ? `Updated ${saved.name}` : `Created ${saved.name}`, "Product", saved.id);
   },
 
   setTierCeiling(tier: CustomerTier, pct: number) {

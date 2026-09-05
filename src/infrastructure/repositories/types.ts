@@ -2,6 +2,7 @@ import type {
   User,
   AuditEntry,
   DomainEvent,
+  Product,
 } from "../../modules/shared/types";
 
 export interface IUserRepository {
@@ -20,4 +21,9 @@ export interface IAuditRepository {
 export interface IDomainEventRepository {
   emit(event: DomainEvent): Promise<DomainEvent>;
   list(): Promise<DomainEvent[]>;
+}
+
+export interface IProductRepository {
+  list(): Promise<Product[]>;
+  upsert(product: Product): Promise<Product>;
 }
