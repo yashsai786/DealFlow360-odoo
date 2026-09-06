@@ -72,6 +72,7 @@ async function main() {
         taxPct: p.taxPct,
         description: p.description,
         cycle: p.cycle || null,
+        createdAt: p.createdAt ? new Date(p.createdAt) : new Date(),
       },
     });
   }
@@ -140,6 +141,8 @@ async function main() {
         promisedDeliveryDate: q.promisedDeliveryDate || null,
         nudgedAt: q.nudgedAt || null,
         escalated: Boolean(q.escalated),
+        createdAt: q.createdAt ? new Date(q.createdAt) : new Date(),
+        updatedAt: q.updatedAt ? new Date(q.updatedAt) : new Date(),
       },
     });
   }
