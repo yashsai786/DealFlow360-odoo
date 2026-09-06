@@ -17,11 +17,11 @@ export async function GET(req: Request, context: RouteContext) {
     const quotation = await quotationApplicationService.getById(quotationId, actor);
     return apiSuccess(quotation);
   } catch (err: any) {
-    const status = err?.message?.includes("Access denied")
+    const status = err?.statusCode || (err?.message?.includes("Access denied")
       ? 403
       : err?.message?.includes("not found")
       ? 404
-      : 500;
+      : 500);
     return apiError("QUOTATION_FETCH_ERROR", err?.message || "Failed to fetch quotation", status);
   }
 }
@@ -48,11 +48,11 @@ export async function PATCH(req: Request, context: RouteContext) {
     );
     return apiSuccess(updated);
   } catch (err: any) {
-    const status = err?.message?.includes("Access denied")
+    const status = err?.statusCode || (err?.message?.includes("Access denied")
       ? 403
       : err?.message?.includes("not found")
       ? 404
-      : 500;
+      : 500);
     return apiError("QUOTATION_UPDATE_ERROR", err?.message || "Failed to update quotation", status);
   }
 }
@@ -65,13 +65,13 @@ export async function DELETE(req: Request, context: RouteContext) {
     const result = await quotationApplicationService.delete(quotationId, actor);
     return apiSuccess(result);
   } catch (err: any) {
-    const status = err?.message?.includes("Access denied")
+    const status = err?.statusCode || (err?.message?.includes("Access denied")
       ? 403
       : err?.message?.includes("not found")
       ? 404
       : err?.message?.includes("Only DRAFT")
       ? 400
-      : 500;
+      : 500);
     return apiError("QUOTATION_DELETE_ERROR", err?.message || "Failed to delete quotation", status);
   }
 }

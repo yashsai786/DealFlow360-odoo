@@ -15,7 +15,7 @@ export async function GET(req: Request) {
     });
     return apiSuccess(approvals);
   } catch (err: any) {
-    const statusCode = err?.message?.includes("Access denied") ? 403 : 500;
+    const statusCode = err?.statusCode || (err?.message?.includes("Access denied") ? 403 : 500);
     return apiError("APPROVALS_FETCH_ERROR", err?.message || "Failed to fetch approvals", statusCode);
   }
 }

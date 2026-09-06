@@ -10,3 +10,5 @@ package-lock.json
 dev.db
 dev.db-journal
 scratch/
+
+final_comprehensive_audit.ts
