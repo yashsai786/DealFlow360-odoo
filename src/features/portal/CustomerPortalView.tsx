@@ -6,7 +6,7 @@ import {
   totalsOf,
   negotiationActions,
 } from "../../infrastructure/store";
-import type { Quotation, Approval } from "../../modules/shared/types";
+import type { Quotation, Approval, FulfillmentOrder, Invoice } from "../../modules/shared/types";
 import { lineNet } from "../../modules/quotations/service";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
@@ -35,6 +35,16 @@ import {
   Info,
   Search,
   X,
+  PackageCheck,
+  Truck,
+  Boxes,
+  Printer,
+  Receipt,
+  Download,
+  Check,
+  CreditCard,
+  ExternalLink,
+  Package,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -132,6 +142,69 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
     initialQuoteId || myQuotations[0]?.id || "",
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<"proposals" | "orders">("proposals");
+  const [orderSearchQuery, setOrderSearchQuery] = useState("");
+  const [orderStatusFilter, setOrderStatusFilter] = useState("ALL");
+  const [selectedInvoiceModal, setSelectedInvoiceModal] = useState<{
+    invoice: Invoice;
+    quotation?: Quotation | null;
+  } | null>(null);
+
+  const myQuoteIds = useMemo(() => new Set(myQuotations.map((q) => q.id)), [myQuotations]);
+  const customerOrders = useMemo(
+    () => state.orders.filter((o) => myQuoteIds.has(o.quotationId)),
+    [state.orders, myQuoteIds]
+  );
+  const customerInvoices = useMemo(
+    () => state.invoices.filter((i) => myQuoteIds.has(i.quotationId) || i.customerId === myCustomerId),
+    [state.invoices, myQuoteIds, myCustomerId]
+  );
+  const warehouseMap = useMemo(
+    () => Object.fromEntries(state.warehouses.map((w) => [w.id, w])),
+    [state.warehouses]
+  );
+
+  const filteredOrders = useMemo(() => {
+    return customerOrders.filter((order) => {
+      if (orderStatusFilter !== "ALL" && order.status !== orderStatusFilter) return false;
+      if (!orderSearchQuery.trim()) return true;
+      const term = orderSearchQuery.toLowerCase().trim();
+      const q = myQuotations.find((q) => q.id === order.quotationId);
+      const hasProduct = order.allocations.some((a) => {
+        const p = products[a.productId];
+        return p?.name.toLowerCase().includes(term);
+      });
+      return (
+        order.id.toLowerCase().includes(term) ||
+        (q && q.number.toLowerCase().includes(term)) ||
+        order.status.toLowerCase().includes(term) ||
+        hasProduct
+      );
+    });
+  }, [customerOrders, orderStatusFilter, orderSearchQuery, myQuotations, products]);
+
+  const deliveredCount = useMemo(
+    () => customerOrders.filter((o) => o.status === "DELIVERED").length,
+    [customerOrders]
+  );
+  const shippedCount = useMemo(
+    () => customerOrders.filter((o) => o.status === "SHIPPED").length,
+    [customerOrders]
+  );
+  const awaitingCount = useMemo(
+    () =>
+      customerOrders.filter(
+        (o) => o.status === "AWAITING" || o.status === "ALLOCATED" || o.status === "BACKORDERED",
+      ).length,
+    [customerOrders]
+  );
+  const totalPaidAmount = useMemo(
+    () =>
+      customerInvoices
+        .filter((i) => i.status === "PAID")
+        .reduce((sum, i) => sum + i.amount, 0),
+    [customerInvoices]
+  );
 
   // Sync selectedQuoteId if initialQuoteId prop changes
   useEffect(() => {
@@ -389,9 +462,39 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Col: Customer Proposals List */}
-        <Card className="shadow-xs border-border">
+      {/* Tab Switcher: Commercial Proposals vs Order History & Invoices */}
+      <div className="flex items-center gap-2 border-b border-border pb-1">
+        <button
+          type="button"
+          onClick={() => setActiveTab("proposals")}
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+            activeTab === "proposals"
+              ? "bg-primary text-primary-foreground shadow-xs"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          }`}
+        >
+          <FileText className="h-4 w-4" />
+          Commercial Proposals ({filteredQuotations.length})
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("orders")}
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+            activeTab === "orders"
+              ? "bg-primary text-primary-foreground shadow-xs"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          }`}
+        >
+          <PackageCheck className="h-4 w-4" />
+          Order & Delivery History ({customerOrders.length})
+        </button>
+      </div>
+
+      {activeTab === "proposals" ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Col: Customer Proposals List */}
+          <Card className="shadow-xs border-border">
           <CardHeader className="p-4 pb-3 border-b border-border space-y-2.5">
             <div>
               <CardTitle className="text-xs font-semibold flex items-center justify-between">
@@ -531,10 +634,28 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
                         {isSubmitting ? "Processing..." : "Confirm Quotation"}
                       </Button>
                     ) : (
-                      <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 text-xs py-1 px-2.5 flex items-center gap-1">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                        Order Confirmed
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 text-xs py-1 px-2.5 flex items-center gap-1">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                          Order Confirmed
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const inv = state.invoices.find((i) => i.quotationId === quotation.id);
+                            if (inv) {
+                              setSelectedInvoiceModal({ invoice: inv, quotation });
+                            } else {
+                              toast.info("Invoice is being prepared by finance.");
+                            }
+                          }}
+                          className="h-8 text-xs flex items-center gap-1.5 border-primary/40 text-primary hover:bg-primary/10 cursor-pointer"
+                        >
+                          <Receipt className="h-3.5 w-3.5" />
+                          View Invoice & Receipt
+                        </Button>
+                      </div>
                     )}
                   </div>
                 </CardHeader>
@@ -812,6 +933,624 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
               Select a commercial proposal from the left to view terms and submit negotiation requests.
             </Card>
           )}
+        </div>
+      </div>
+    ) : (
+      /* ORDER & DELIVERY HISTORY VIEW */
+      <div className="space-y-6">
+        {/* Order Metrics Summary Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <Card className="p-3.5 border-border shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium text-muted-foreground">Total Orders Placed</span>
+              <Package className="h-4 w-4 text-primary" />
+            </div>
+            <div className="text-xl font-bold font-mono mt-1 text-foreground">{customerOrders.length}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Enterprise hardware fulfillment</div>
+          </Card>
+
+          <Card className="p-3.5 border-border shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium text-muted-foreground">Delivered & Received</span>
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            </div>
+            <div className="text-xl font-bold font-mono mt-1 text-emerald-600">{deliveredCount}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Stock freed & fulfilled</div>
+          </Card>
+
+          <Card className="p-3.5 border-border shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium text-muted-foreground">Dispatched / In Transit</span>
+              <Truck className="h-4 w-4 text-sky-600" />
+            </div>
+            <div className="text-xl font-bold font-mono mt-1 text-sky-600">{shippedCount}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">En route from warehouse depots</div>
+          </Card>
+
+          <Card className="p-3.5 border-border shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium text-muted-foreground">In Processing</span>
+              <Clock className="h-4 w-4 text-amber-600" />
+            </div>
+            <div className="text-xl font-bold font-mono mt-1 text-amber-600">{awaitingCount}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Awaiting depot allocation / split</div>
+          </Card>
+        </div>
+
+        {/* Search & Status Filters */}
+        <Card className="p-3.5 border-border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search orders by Order #, quote #, product..."
+              value={orderSearchQuery}
+              onChange={(e) => setOrderSearchQuery(e.target.value)}
+              className="pl-8 pr-7 h-8 text-xs w-full bg-background"
+            />
+            {orderSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setOrderSearchQuery("")}
+                className="absolute right-2 top-2 p-0.5 rounded text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(["ALL", "DELIVERED", "SHIPPED", "ALLOCATED", "AWAITING"] as const).map((status) => (
+              <Button
+                key={status}
+                variant={orderStatusFilter === status ? "default" : "outline"}
+                size="sm"
+                onClick={() => setOrderStatusFilter(status)}
+                className="h-7 text-[11px] px-2.5"
+              >
+                {status === "ALL" ? "All Orders" : status}
+              </Button>
+            ))}
+          </div>
+        </Card>
+
+        {/* Orders List */}
+        <div className="space-y-4">
+          {filteredOrders.length === 0 ? (
+            <Card className="p-12 text-center border-border shadow-xs space-y-2">
+              <PackageCheck className="h-8 w-8 mx-auto text-muted-foreground/40" />
+              <h3 className="text-sm font-semibold text-foreground">No orders found</h3>
+              <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                {orderSearchQuery || orderStatusFilter !== "ALL"
+                  ? "No orders match your search and filter criteria."
+                  : "No orders have been scheduled yet. Review and confirm an active proposal to initiate fulfillment."}
+              </p>
+            </Card>
+          ) : (
+            filteredOrders.map((order) => {
+              const quote = myQuotations.find((q) => q.id === order.quotationId);
+              const inv = state.invoices.find((i) => i.quotationId === order.quotationId);
+              const isDelivered = order.status === "DELIVERED";
+              const isShipped = order.status === "SHIPPED";
+              const isAllocated = order.status === "ALLOCATED";
+              const isBackordered = order.status === "BACKORDERED";
+
+              return (
+                <Card key={order.id} className="border-border shadow-xs overflow-hidden">
+                  {/* Order Header */}
+                  <div className="p-4 bg-muted/20 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-sm text-foreground">
+                          Order #{order.id}
+                        </span>
+                        {quote && (
+                          <Badge variant="outline" className="font-mono text-[10px] text-primary">
+                            Quotation: {quote.number}
+                          </Badge>
+                        )}
+                        {isDelivered ? (
+                          <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white font-semibold text-[10px] flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3" /> Delivered
+                          </Badge>
+                        ) : isShipped ? (
+                          <Badge className="bg-sky-600 hover:bg-sky-600 text-white font-semibold text-[10px] flex items-center gap-1">
+                            <Truck className="h-3 w-3" /> In Transit
+                          </Badge>
+                        ) : isAllocated ? (
+                          <Badge className="bg-indigo-600 hover:bg-indigo-600 text-white font-semibold text-[10px] flex items-center gap-1">
+                            <Boxes className="h-3 w-3" /> Stock Allocated
+                          </Badge>
+                        ) : isBackordered ? (
+                          <Badge variant="destructive" className="font-semibold text-[10px] flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3" /> Backordered
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-amber-600 border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-[10px] flex items-center gap-1">
+                            <Clock className="h-3 w-3" /> Awaiting Fulfillment
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                        <span>Placed: {new Date(order.createdAt).toLocaleDateString()}</span>
+                        {order.shippedAt && (
+                          <span>• Dispatched: {new Date(order.shippedAt).toLocaleDateString()}</span>
+                        )}
+                        {order.deliveredAt && (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                            • Delivered: {new Date(order.deliveredAt).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Invoice Quick Action */}
+                    <div className="flex items-center gap-2">
+                      {inv ? (
+                        <div className="flex items-center gap-2">
+                          <div className="text-right hidden sm:block">
+                            <div className="text-[10px] uppercase font-mono text-muted-foreground">
+                              {inv.number}
+                            </div>
+                            <div className="text-xs font-mono font-bold text-foreground">
+                              ₹{inv.amount.toLocaleString()}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setSelectedInvoiceModal({ invoice: inv, quotation: quote })}
+                            className="h-8 text-xs flex items-center gap-1.5 border-primary/40 text-primary hover:bg-primary/10 shadow-xs cursor-pointer"
+                          >
+                            <Receipt className="h-3.5 w-3.5" />
+                            View Invoice & Receipt
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground italic">
+                          Invoice in preparation
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Order Allocations & Items */}
+                  <CardContent className="p-4 space-y-3">
+                    <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Boxes className="h-3.5 w-3.5 text-primary" />
+                      <span>Fulfillment Shipments & Depot Allocations</span>
+                    </div>
+
+                    {order.allocations.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                        {order.allocations.map((a, idx) => {
+                          const p = products[a.productId];
+                          const wh = warehouseMap[a.warehouseId];
+                          return (
+                            <div
+                              key={idx}
+                              className="p-2.5 rounded-lg border border-border bg-card/60 flex items-start justify-between gap-2"
+                            >
+                              <div>
+                                <div className="font-semibold text-xs text-foreground">
+                                  {p?.name || a.productId}
+                                </div>
+                                <div className="text-[11px] text-muted-foreground mt-0.5">
+                                  Depot: <strong className="text-foreground font-normal">{wh?.name || a.warehouseId}</strong>
+                                </div>
+                                <div className="text-[10px] text-muted-foreground">
+                                  Category: {p?.category || "Hardware"}
+                                </div>
+                              </div>
+                              <Badge variant="secondary" className="font-mono text-xs shrink-0">
+                                {a.qty} Units
+                              </Badge>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : quote ? (
+                      <div className="text-xs text-muted-foreground">
+                        {quote.lines
+                          .filter((l) => products[l.productId]?.category === "Hardware")
+                          .map((l) => (
+                            <span key={l.id} className="mr-3">
+                              • {l.qty}x {products[l.productId]?.name || l.productId}
+                            </span>
+                          ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground italic">
+                        Awaiting depot assignment
+                      </div>
+                    )}
+
+                    {/* Backorder Notices */}
+                    {order.backorders.length > 0 && (
+                      <div className="p-2.5 rounded-lg border border-rose-200 bg-rose-50 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200 text-xs flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="h-3.5 w-3.5 text-rose-600" />
+                          <span>
+                            {order.backorders.reduce((sum, b) => sum + b.qty, 0)} units placed on depot backorder. Will be dispatched upon arrival.
+                          </span>
+                        </div>
+                        <Badge variant="destructive" className="text-[10px]">
+                          {order.backorders[0]?.status}
+                        </Badge>
+                      </div>
+                    )}
+
+                    {/* Payment Status Bar */}
+                    {inv && (
+                      <div className="pt-2 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground">Invoice Status:</span>
+                          {inv.status === "PAID" ? (
+                            <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white font-semibold text-[10px]">
+                              PAID IN FULL
+                            </Badge>
+                          ) : inv.status === "PARTIALLY_PAID" ? (
+                            <Badge className="bg-amber-500 text-white font-semibold text-[10px]">
+                              PARTIAL PAYMENT
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-rose-600 border-rose-300 text-[10px]">
+                              PAYMENT DUE
+                            </Badge>
+                          )}
+                          {inv.payments.length > 0 && (
+                            <span className="text-[11px] text-muted-foreground">
+                              (Settled via {inv.payments[inv.payments.length - 1]?.method})
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-muted-foreground text-[11px]">
+                          Due: {new Date(inv.dueDate).toLocaleDateString()}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })
+          )}
+        </div>
+
+        {/* All Customer Invoices Section */}
+        <Card className="border-border shadow-xs">
+          <CardHeader className="p-4 border-b border-border">
+            <CardTitle className="text-xs font-semibold flex items-center gap-1.5">
+              <Receipt className="h-4 w-4 text-primary" />
+              All Billing Invoices & Receipts ({customerInvoices.length})
+            </CardTitle>
+            <CardDescription className="text-[11px]">
+              Complete record of commercial billing documents, tax invoices, and payment receipts.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/40 text-[11px]">
+                  <TableHead>Invoice #</TableHead>
+                  <TableHead>Quotation Ref</TableHead>
+                  <TableHead>Issue Date</TableHead>
+                  <TableHead>Due Date</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="text-xs">
+                {customerInvoices.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
+                      No billing invoices issued yet.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  customerInvoices.map((i) => {
+                    const q = myQuotations.find((quote) => quote.id === i.quotationId);
+                    return (
+                      <TableRow key={i.id}>
+                        <TableCell className="font-mono font-semibold text-foreground">
+                          {i.number}
+                        </TableCell>
+                        <TableCell className="font-mono text-muted-foreground">
+                          {q?.number || i.quotationId || "—"}
+                        </TableCell>
+                        <TableCell>{new Date(i.issuedAt).toLocaleDateString()}</TableCell>
+                        <TableCell>{new Date(i.dueDate).toLocaleDateString()}</TableCell>
+                        <TableCell className="text-right font-mono font-semibold text-foreground">
+                          ₹{i.amount.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {i.status === "PAID" ? (
+                            <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white font-bold text-[10px]">
+                              PAID
+                            </Badge>
+                          ) : i.status === "PARTIALLY_PAID" ? (
+                            <Badge className="bg-amber-500 text-white font-bold text-[10px]">
+                              PARTIAL
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="border-rose-400 text-rose-600 text-[10px]">
+                              UNPAID
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setSelectedInvoiceModal({ invoice: i, quotation: q })}
+                            className="h-7 text-xs flex items-center gap-1 cursor-pointer"
+                          >
+                            <Receipt className="h-3 w-3" />
+                            View Invoice
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+    )}
+
+    {/* Basic Invoice & Payment Receipt Modal */}
+    {selectedInvoiceModal && (
+      <InvoiceModal
+        invoice={selectedInvoiceModal.invoice}
+        quotation={selectedInvoiceModal.quotation}
+        customer={customer}
+        products={products}
+        onClose={() => setSelectedInvoiceModal(null)}
+      />
+    )}
+  </div>
+  );
+}
+
+interface InvoiceModalProps {
+  invoice: Invoice | null;
+  quotation?: Quotation | null;
+  customer?: any;
+  products: Record<string, any>;
+  onClose: () => void;
+}
+
+export function InvoiceModal({ invoice, quotation, customer, products, onClose }: InvoiceModalProps) {
+  if (!invoice) return null;
+
+  const paidTotal = invoice.payments.reduce((sum, p) => sum + p.amount, 0);
+  const balanceDue = Math.max(0, invoice.amount - paidTotal);
+  const isPaid = invoice.status === "PAID" || balanceDue <= 0.01;
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+      <div className="bg-card text-card-foreground border border-border rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        {/* Modal Top Action Bar */}
+        <div className="p-3.5 px-5 bg-muted/40 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Receipt className="h-4 w-4 text-primary" />
+            <span className="text-xs font-semibold text-foreground">
+              Official Tax Invoice · {invoice.number}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handlePrint}
+              className="h-7 text-xs flex items-center gap-1.5"
+            >
+              <Printer className="h-3.5 w-3.5" />
+              Print / Save PDF
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onClose}
+              className="h-7 w-7 p-0 rounded-full text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Printable Document Body */}
+        <div className="p-6 md:p-8 space-y-6 overflow-y-auto print:p-0">
+          {/* Header Banner */}
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-6 border-b border-border">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 rounded bg-primary text-primary-foreground font-black text-sm flex items-center justify-center">
+                  DF
+                </div>
+                <span className="font-bold text-lg tracking-tight text-foreground">DealFlow360</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Enterprise B2B Commerce & Quotation Platform</p>
+              <p className="text-[11px] text-muted-foreground">GSTIN: 27AABCB1234F1Z9 · PAN: AAACB1234F</p>
+              <p className="text-[11px] text-muted-foreground">Bandra Kurla Complex, Mumbai 400051, India</p>
+            </div>
+
+            <div className="sm:text-right">
+              <div className="text-xs font-mono uppercase tracking-widest text-muted-foreground font-semibold">
+                Tax Invoice / Cash Receipt
+              </div>
+              <div className="text-xl font-mono font-bold text-foreground mt-0.5">{invoice.number}</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Issued: <strong className="text-foreground">{new Date(invoice.issuedAt).toLocaleDateString()}</strong>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Due Date: <strong className="text-foreground">{new Date(invoice.dueDate).toLocaleDateString()}</strong>
+              </div>
+              {quotation && (
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Quotation Ref: <strong className="font-mono text-primary">{quotation.number}</strong>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Bill To & Status Banner */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+            <div className="p-3.5 rounded-lg bg-muted/30 border border-border space-y-1">
+              <div className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground font-semibold">
+                Billed To
+              </div>
+              <div className="font-bold text-sm text-foreground">{customer?.name ?? "Customer Account"}</div>
+              <div className="text-xs text-muted-foreground">{customer?.email || "billing@customer.com"}</div>
+              <div className="text-xs text-muted-foreground">Tier: {customer?.tier ?? "Commercial"} Account</div>
+            </div>
+
+            <div className="p-3.5 rounded-lg border flex flex-col justify-center items-start sm:items-end bg-muted/10 border-border">
+              <div className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground font-semibold mb-1">
+                Payment Status
+              </div>
+              {isPaid ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-emerald-600 text-white font-bold text-xs shadow-xs">
+                  <CheckCircle2 className="h-4 w-4" />
+                  PAID IN FULL
+                </div>
+              ) : invoice.status === "PARTIALLY_PAID" ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-500 text-white font-bold text-xs shadow-xs">
+                  <Clock className="h-4 w-4" />
+                  PARTIALLY PAID
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-rose-600 text-white font-bold text-xs shadow-xs">
+                  <AlertTriangle className="h-4 w-4" />
+                  PAYMENT PENDING
+                </div>
+              )}
+              {isPaid && invoice.payments.length > 0 && (
+                <span className="text-[10px] text-muted-foreground mt-1">
+                  Settled via {invoice.payments[invoice.payments.length - 1]?.method}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Itemized Table */}
+          <div className="rounded-lg border border-border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 text-[11px]">
+                  <TableHead className="w-12">#</TableHead>
+                  <TableHead>Product / Service</TableHead>
+                  <TableHead className="text-center">Qty</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
+                  <TableHead className="text-right">Disc %</TableHead>
+                  <TableHead className="text-right">Total (₹)</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="text-xs">
+                {quotation && quotation.lines.length > 0 ? (
+                  quotation.lines.map((l, index) => {
+                    const p = products[l.productId];
+                    const net = (l.qty * l.unitPrice * (100 - l.discountPct)) / 100;
+                    return (
+                      <TableRow key={l.id}>
+                        <TableCell className="font-mono text-muted-foreground">{index + 1}</TableCell>
+                        <TableCell>
+                          <div className="font-medium text-foreground">{p?.name || l.productId}</div>
+                          <div className="text-[11px] text-muted-foreground">{p?.category || "Commercial Product"}</div>
+                        </TableCell>
+                        <TableCell className="text-center font-mono">{l.qty}</TableCell>
+                        <TableCell className="text-right font-mono">₹{l.unitPrice.toLocaleString()}</TableCell>
+                        <TableCell className="text-right font-mono">{l.discountPct > 0 ? `${l.discountPct}%` : "-"}</TableCell>
+                        <TableCell className="text-right font-mono font-semibold">₹{Math.round(net).toLocaleString()}</TableCell>
+                      </TableRow>
+                    );
+                  })
+                ) : (
+                  <TableRow>
+                    <TableCell className="font-mono text-muted-foreground">1</TableCell>
+                    <TableCell>
+                      <div className="font-medium text-foreground">Commercial Fulfillment & Services</div>
+                      <div className="text-[11px] text-muted-foreground">Standard delivery settlement</div>
+                    </TableCell>
+                    <TableCell className="text-center font-mono">1</TableCell>
+                    <TableCell className="text-right font-mono">₹{invoice.amount.toLocaleString()}</TableCell>
+                    <TableCell className="text-right font-mono">-</TableCell>
+                    <TableCell className="text-right font-mono font-semibold">₹{invoice.amount.toLocaleString()}</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Financial Calculation Breakdown */}
+          <div className="flex flex-col sm:flex-row justify-between gap-4 pt-2">
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p className="font-semibold text-foreground">Terms & Conditions:</p>
+              <p>• Goods once delivered are covered under standard manufacturer enterprise warranty.</p>
+              <p>• This is a computer-generated tax invoice and requires no physical signature.</p>
+            </div>
+
+            <div className="w-full sm:w-64 space-y-2 text-xs">
+              <div className="flex justify-between text-muted-foreground">
+                <span>Subtotal</span>
+                <span className="font-mono">₹{Math.round(invoice.amount / 1.08).toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Estimated Tax (GST 8%)</span>
+                <span className="font-mono">₹{Math.round(invoice.amount - invoice.amount / 1.08).toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between font-bold text-sm text-foreground pt-2 border-t border-border">
+                <span>Total Amount</span>
+                <span className="font-mono text-primary">₹{invoice.amount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium pt-1">
+                <span>Total Paid</span>
+                <span className="font-mono">₹{paidTotal.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between font-bold text-xs pt-1 border-t border-dashed border-border">
+                <span>Balance Due</span>
+                <span className={`font-mono ${balanceDue > 0.01 ? "text-rose-600" : "text-emerald-600"}`}>
+                  ₹{balanceDue.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Payment Receipts History */}
+          {invoice.payments.length > 0 && (
+            <div className="p-3.5 rounded-lg bg-muted/20 border border-border space-y-2">
+              <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <CreditCard className="h-3.5 w-3.5 text-primary" />
+                <span>Recorded Payments & Transactions</span>
+              </div>
+              <div className="space-y-1">
+                {invoice.payments.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between text-xs py-1 border-b border-border/50 last:border-0">
+                    <div className="flex items-center gap-2">
+                      <Check className="h-3 w-3 text-emerald-600" />
+                      <span className="font-medium text-foreground">{p.method}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        ({new Date(p.at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })})
+                      </span>
+                    </div>
+                    <span className="font-mono font-semibold text-emerald-600">₹{p.amount.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="p-3.5 px-5 bg-muted/30 border-t border-border flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose} className="text-xs">
+            Close
+          </Button>
         </div>
       </div>
     </div>

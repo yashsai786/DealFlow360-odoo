@@ -551,9 +551,11 @@ for (const q of QUOTATIONS) {
   if (["CONFIRMED", "FULFILLMENT", "INVOICED", "PAID"].includes(q.stage)) {
     const idx = parseInt(q.id.replace("q-", ""));
     const hwLine = q.lines.find((l) => PRODUCTS.find((p) => p.id === l.productId)?.category === "Hardware") || q.lines[0];
-    const status = q.stage === "PAID" || q.stage === "INVOICED"
-      ? "SHIPPED"
-      : (idx % 3 === 0 ? "BACKORDERED" : idx % 3 === 1 ? "ALLOCATED" : "AWAITING");
+    const status = q.stage === "PAID"
+      ? "DELIVERED"
+      : q.stage === "INVOICED"
+        ? "SHIPPED"
+        : (idx % 3 === 0 ? "BACKORDERED" : idx % 3 === 1 ? "ALLOCATED" : "AWAITING");
 
     const allocations: Allocation[] = [];
     const backorders: Backorder[] = [];
@@ -587,7 +589,8 @@ for (const q of QUOTATIONS) {
       allocations,
       backorders,
       createdAt: q.createdAt,
-      shippedAt: status === "SHIPPED" ? q.updatedAt : undefined,
+      shippedAt: status === "SHIPPED" || status === "DELIVERED" ? q.updatedAt : undefined,
+      deliveredAt: status === "DELIVERED" ? q.updatedAt : undefined,
       dueAt: ahead(7),
     });
   }

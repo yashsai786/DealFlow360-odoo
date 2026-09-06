@@ -194,13 +194,17 @@ export function FulfillmentView() {
                     <span className="font-mono text-primary">{q?.number}</span>
                     <Badge
                       variant={
-                        o.status === "SHIPPED"
-                          ? "secondary"
-                          : o.status === "BACKORDERED"
-                            ? "destructive"
-                            : "outline"
+                        o.status === "DELIVERED"
+                          ? "default"
+                          : o.status === "SHIPPED"
+                            ? "secondary"
+                            : o.status === "BACKORDERED"
+                              ? "destructive"
+                              : "outline"
                       }
-                      className="text-[9px] uppercase font-mono py-0 px-1"
+                      className={`text-[9px] uppercase font-mono py-0 px-1 ${
+                        o.status === "DELIVERED" ? "bg-emerald-600 hover:bg-emerald-600 text-white" : ""
+                      }`}
                     >
                       {o.status}
                     </Badge>
@@ -228,13 +232,17 @@ export function FulfillmentView() {
                     </CardTitle>
                     <Badge
                       variant={
-                        order.status === "SHIPPED"
-                          ? "secondary"
-                          : order.status === "BACKORDERED"
-                            ? "destructive"
-                            : "outline"
+                        order.status === "DELIVERED"
+                          ? "default"
+                          : order.status === "SHIPPED"
+                            ? "secondary"
+                            : order.status === "BACKORDERED"
+                              ? "destructive"
+                              : "outline"
                       }
-                      className="text-xs uppercase font-mono"
+                      className={`text-xs uppercase font-mono ${
+                        order.status === "DELIVERED" ? "bg-emerald-600 hover:bg-emerald-600 text-white" : ""
+                      }`}
                     >
                       {order.status}
                     </Badge>
@@ -245,7 +253,13 @@ export function FulfillmentView() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {order.status !== "SHIPPED" && (
+                  {order.status === "DELIVERED" && (
+                    <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 font-semibold flex items-center gap-1">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Delivered & Stock Deducted
+                    </Badge>
+                  )}
+                  {order.status !== "SHIPPED" && order.status !== "DELIVERED" && (
                     canManageFulfillment ? (
                       <Button
                         size="sm"

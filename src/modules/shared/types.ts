@@ -190,7 +190,7 @@ export interface Backorder {
   status: "OPEN" | "CONSOLIDATED";
 }
 
-export type FulfillmentStatus = "AWAITING" | "ALLOCATED" | "SHIPPED" | "BACKORDERED";
+export type FulfillmentStatus = "AWAITING" | "ALLOCATED" | "SHIPPED" | "DELIVERED" | "BACKORDERED";
 
 export interface FulfillmentOrder {
   id: string;
@@ -200,6 +200,7 @@ export interface FulfillmentOrder {
   backorders: Backorder[];
   createdAt: string;
   shippedAt?: string | undefined;
+  deliveredAt?: string | undefined;
   dueAt: string;
 }
 

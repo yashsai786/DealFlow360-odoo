@@ -159,6 +159,10 @@ export function useAppState() {
   );
 }
 
+export function getState(): AppState {
+  return state;
+}
+
 /* ------------------------------------------------------------------ helpers */
 
 let cachedProductsRef: Product[] | null = null;
@@ -497,6 +501,10 @@ export const identityActions = {
       emit("UserSignedOut", state.session.name);
     }
     set({ session: null });
+  },
+  switchUser(user: User | null) {
+    set({ session: user });
+    notify();
   },
 };
 
@@ -1086,6 +1094,60 @@ export const fulfillmentActions = {
     emit("OrderShipped", orderId);
     notify();
   },
+
+  async deliver(orderId: string) {
+    const user = requireSession();
+    assertCan(user.role, "fulfillment.manage");
+    const order = state.orders.find((o) => o.id === orderId);
+    if (!order) return;
+
+    let updatedInventory = [...state.inventory];
+    const itemsToPersist: InventoryItem[] = [];
+    for (const alloc of order.allocations) {
+      const idx = updatedInventory.findIndex(
+        (i) => i.warehouseId === alloc.warehouseId && i.productId === alloc.productId
+      );
+      if (idx !== -1) {
+        const cur = updatedInventory[idx]!;
+        const updatedItem: InventoryItem = {
+          ...cur,
+          reserved: Math.max(0, cur.reserved - alloc.qty),
+          available: Math.max(0, cur.available - alloc.qty),
+        };
+        updatedInventory[idx] = updatedItem;
+        itemsToPersist.push(updatedItem);
+      }
+    }
+
+    if (itemsToPersist.length > 0) {
+      Promise.allSettled(itemsToPersist.map((item) => inventoryApi.upsert(item))).catch(console.error);
+    }
+
+    const updatedOrder: FulfillmentOrder = {
+      ...order,
+      status: "DELIVERED",
+      deliveredAt: now(),
+      shippedAt: order.shippedAt || now(),
+    };
+
+    state = {
+      ...state,
+      inventory: updatedInventory,
+      orders: state.orders.map((o) => (o.id === orderId ? updatedOrder : o)),
+    };
+
+    try {
+      await fulfillmentApi.update(orderId, {
+        status: "DELIVERED",
+        shippedAt: updatedOrder.shippedAt,
+      });
+    } catch (err) {
+      console.error("[Fulfillment] Failed to persist delivery:", err);
+    }
+    record("Marked order as delivered and deducted physical inventory", "Fulfillment", orderId);
+    emit("OrderDelivered", orderId);
+    notify();
+  },
 };
 
 /* ---------------------------------------------------------------- billing */
@@ -1117,7 +1179,100 @@ export const billingActions = {
     };
     if (status === "PAID") {
       const quotation = state.quotations.find((q) => q.id === invoice.quotationId);
-      if (quotation && quotation.stage === "INVOICED") replaceQuotation(transition(quotation, "PAID"));
+      if (quotation) {
+        replaceQuotation({ ...quotation, stage: "PAID", updatedAt: now() });
+        quotationsApi.update(quotation.id, { stage: "PAID" }).catch(console.error);
+      }
+
+      // Automatically deliver related fulfillment orders, free reserved stock, and deduct available stock
+      const relatedOrders = state.orders.filter((o) => o.quotationId === invoice.quotationId);
+      let updatedInventory = [...state.inventory];
+      const itemsToPersist: InventoryItem[] = [];
+
+      for (const order of relatedOrders) {
+        let allocationsToProcess = order.allocations;
+
+        // If no allocations exist yet, allocate stock automatically
+        if ((!allocationsToProcess || allocationsToProcess.length === 0) && quotation) {
+          try {
+            const plan = splitFor(state, order);
+            if (plan.allocations && plan.allocations.length > 0) {
+              allocationsToProcess = plan.allocations;
+            }
+          } catch {
+            const prods = productMap(state);
+            const hardwareLines = quotation.lines.filter(
+              (l) => prods[l.productId]?.category === "Hardware"
+            );
+            const defaultWh = state.warehouses[0] || { id: "wh-central", shipmentCost: 0 };
+            allocationsToProcess = hardwareLines.map((l) => ({
+              warehouseId: defaultWh.id,
+              productId: l.productId,
+              qty: l.qty,
+              shipmentCost: defaultWh.shipmentCost,
+            }));
+          }
+        }
+
+        // Deduct available and free reserved for all allocated quantities
+        for (const alloc of allocationsToProcess) {
+          const idx = updatedInventory.findIndex(
+            (i) => i.warehouseId === alloc.warehouseId && i.productId === alloc.productId
+          );
+          if (idx !== -1) {
+            const current = updatedInventory[idx]!;
+            const updatedItem: InventoryItem = {
+              ...current,
+              // Free reserved stock
+              reserved: Math.max(0, current.reserved - alloc.qty),
+              // Deduct from available physical stock
+              available: Math.max(0, current.available - alloc.qty),
+            };
+            updatedInventory[idx] = updatedItem;
+            itemsToPersist.push(updatedItem);
+          }
+        }
+      }
+
+      // Persist inventory updates
+      if (itemsToPersist.length > 0) {
+        Promise.allSettled(itemsToPersist.map((item) => inventoryApi.upsert(item))).catch((err) =>
+          console.error("[Billing] Failed to persist inventory deduction:", err)
+        );
+      }
+
+      // Mark orders as DELIVERED
+      const deliveredOrders = state.orders.map((o) => {
+        if (o.quotationId === invoice.quotationId) {
+          const updatedOrder: FulfillmentOrder = {
+            ...o,
+            status: "DELIVERED",
+            shippedAt: o.shippedAt || now(),
+            deliveredAt: now(),
+          };
+          fulfillmentApi
+            .update(o.id, {
+              status: "DELIVERED",
+              shippedAt: updatedOrder.shippedAt,
+            })
+            .catch((err) => console.error("[Billing] Failed to persist order delivery:", err));
+
+          emit("OrderDelivered", `${o.id} · Delivered upon payment completion`);
+          record(
+            "Order marked as DELIVERED. Reserved stock freed & available stock deducted upon full payment.",
+            "Fulfillment",
+            o.id
+          );
+          return updatedOrder;
+        }
+        return o;
+      });
+
+      state = {
+        ...state,
+        inventory: updatedInventory,
+        orders: deliveredOrders,
+      };
     }
     record(`Recorded payment of ${payment.amount.toFixed(2)}`, "Payment", invoiceId);
     emit("PaymentRecorded", `${invoice.number} · ${payment.amount.toFixed(2)}`);

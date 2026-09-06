@@ -1,4 +1,4 @@
-import { fulfillmentRepository } from "@/infrastructure/repositories/prismaRepositories";
+import { fulfillmentRepository, quotationRepository } from "@/infrastructure/repositories/prismaRepositories";
 import { apiSuccess, apiError } from "@/lib/api/contracts/schemas";
 import { resolveActor } from "@/application/resolveActor";
 import { requirePermission } from "@/application/authorizationGuard";
@@ -6,11 +6,16 @@ import { requirePermission } from "@/application/authorizationGuard";
 export async function GET(req: Request) {
   try {
     const actor = await resolveActor(req);
+    const list = await fulfillmentRepository.list();
+
     if (actor.role === "CUSTOMER") {
-      return apiError("FORBIDDEN", "Access denied: Customers cannot access internal fulfillment orders", 403);
+      const customerId = actor.customerId || actor.id;
+      const myQuotes = await quotationRepository.list({ customerId });
+      const myQuoteIds = new Set(myQuotes.map((q) => q.id));
+      const filtered = list.filter((o) => myQuoteIds.has(o.quotationId));
+      return apiSuccess(filtered);
     }
 
-    const list = await fulfillmentRepository.list();
     return apiSuccess(list);
   } catch (err: any) {
     const status = err?.statusCode || (err?.message?.includes("Access denied") ? 403 : 500);

@@ -12,3 +12,4 @@ dev.db-journal
 scratch/
 
 final_comprehensive_audit.ts
+test_delivery_and_stock_deduction.ts
