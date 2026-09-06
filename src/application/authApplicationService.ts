@@ -1,9 +1,10 @@
 import {
   userRepository,
+  customerRepository,
   auditRepository,
   domainEventRepository,
 } from "../infrastructure/repositories/prismaRepositories";
-import type { User, Role } from "../modules/shared/types";
+import type { User, Role, CustomerTier } from "../modules/shared/types";
 import { assertCan, can } from "../modules/identity/service";
 import { hashPassword, verifyPassword, validatePasswordStrength } from "../lib/auth/password";
 
@@ -88,7 +89,14 @@ export class AuthApplicationService {
     return user;
   }
 
-  async signup(name: string, email: string, role: Role, customerId?: string, password?: string): Promise<User> {
+  async signup(
+    name: string,
+    email: string,
+    role: Role,
+    customerId?: string,
+    password?: string,
+    newCompany?: { name: string; industry?: string; tier?: CustomerTier }
+  ): Promise<User> {
     const normalizedEmail = email.trim().toLowerCase();
     const existing = await userRepository.findByEmail(normalizedEmail);
     if (existing) {
@@ -103,12 +111,24 @@ export class AuthApplicationService {
 
     const passwordHash = await hashPassword(pwdToHash);
 
+    let assignedCustomerId = customerId;
+    if (role === "CUSTOMER" && newCompany && newCompany.name?.trim()) {
+      const createdCompany = await customerRepository.create({
+        id: uid("c"),
+        name: newCompany.name.trim(),
+        tier: (newCompany.tier as CustomerTier) || "Bronze",
+        industry: newCompany.industry || "General",
+        contactEmail: normalizedEmail,
+      });
+      assignedCustomerId = createdCompany.id;
+    }
+
     const newUser: User = {
       id: uid("u"),
       name: name.trim(),
       email: normalizedEmail,
       role,
-      ...(role === "CUSTOMER" && customerId ? { customerId } : {}),
+      ...(role === "CUSTOMER" && assignedCustomerId ? { customerId: assignedCustomerId } : {}),
     };
 
     const created = await userRepository.create(newUser, passwordHash);

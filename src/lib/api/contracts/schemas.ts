@@ -89,6 +89,13 @@ export const SignupRequestSchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters"),
   role: z.enum(["SALES_REP", "SALES_MANAGER", "FINANCE", "ADMIN", "CUSTOMER"]),
   customerId: z.string().optional(),
+  newCompany: z
+    .object({
+      name: z.string().min(2, "Company name must have at least 2 characters"),
+      industry: z.string().optional(),
+      tier: z.enum(["Bronze", "Silver", "Gold"]).optional(),
+    })
+    .optional(),
 });
 
 export const UpdateProfileSchema = z.object({

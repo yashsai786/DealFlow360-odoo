@@ -699,6 +699,25 @@ export class PrismaCustomerRepository implements ICustomerRepository {
       contactEmail: r.contactEmail,
     }));
   }
+
+  async create(customer: Customer): Promise<Customer> {
+    const row = await prisma.customer.create({
+      data: {
+        id: customer.id,
+        name: customer.name,
+        tier: customer.tier,
+        industry: customer.industry,
+        contactEmail: customer.contactEmail,
+      },
+    });
+    return {
+      id: row.id,
+      name: row.name,
+      tier: row.tier as CustomerTier,
+      industry: row.industry,
+      contactEmail: row.contactEmail,
+    };
+  }
 }
 
 /* --------------------------------------- APPROVAL REPOSITORY */

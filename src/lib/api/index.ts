@@ -1,6 +1,7 @@
 import { apiClient } from "./client";
 import type {
   User,
+  Customer,
   Product,
   Warehouse,
   InventoryItem,
@@ -47,6 +48,16 @@ export const usersApi = {
     apiClient<User>("/api/users/profile", {
       method: "PATCH",
       body: JSON.stringify(patch),
+    }),
+};
+
+/* ----------------------------------------------- CUSTOMERS API CLIENT */
+export const customersApi = {
+  list: () => apiClient<Customer[]>("/api/customers"),
+  create: (customer: Partial<Customer>) =>
+    apiClient<Customer>("/api/customers", {
+      method: "POST",
+      body: JSON.stringify(customer),
     }),
 };
 

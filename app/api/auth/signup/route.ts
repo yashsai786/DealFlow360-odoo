@@ -14,7 +14,8 @@ export async function POST(request: Request) {
       parsed.data.email,
       parsed.data.role,
       parsed.data.customerId,
-      parsed.data.password
+      parsed.data.password,
+      parsed.data.newCompany as any
     );
 
     return apiSuccess(user, undefined, 201);

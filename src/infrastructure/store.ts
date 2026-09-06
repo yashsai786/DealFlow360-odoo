@@ -60,7 +60,7 @@ import {
   InvalidStateTransition,
   SubscriptionModificationInvalid,
 } from "../lib/errors";
-import { productsApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, subscriptionsApi, approvalsApi, recommendationsApi, fulfillmentApi, auditApi, dealHealthApi } from "../lib/api";
+import { productsApi, customersApi, usersApi, warehousesApi, inventoryApi, plansApi, governanceApi, quotationsApi, subscriptionsApi, approvalsApi, recommendationsApi, fulfillmentApi, auditApi, dealHealthApi } from "../lib/api";
 
 export interface AppState {
   session: User | null;
@@ -271,7 +271,14 @@ export const identityActions = {
       throw err;
     }
   },
-  async signup(name: string, email: string, role: Role, customerId?: string, password?: string) {
+  async signup(
+    name: string,
+    email: string,
+    role: Role,
+    customerId?: string,
+    password?: string,
+    newCompany?: { name: string; industry?: string; tier?: CustomerTier }
+  ) {
     const normalizedEmail = email.trim().toLowerCase();
     const existing = state.users.find((u) => u.email.toLowerCase() === normalizedEmail);
     if (existing) {
@@ -284,6 +291,7 @@ export const identityActions = {
       role,
       password,
       ...(role === "CUSTOMER" && customerId ? { customerId } : {}),
+      ...(role === "CUSTOMER" && newCompany ? { newCompany } : {}),
     };
 
     // Make API call to backend
@@ -300,10 +308,26 @@ export const identityActions = {
         throw new Error(errMsg);
       }
       const resData = await response.json();
-      const createdUser = resData.data || resData;
+      const createdUser: User = resData.data || resData;
+
+      let updatedCustomers = state.customers;
+      if (role === "CUSTOMER" && createdUser.customerId) {
+        const companyExists = state.customers.some((c) => c.id === createdUser.customerId);
+        if (!companyExists) {
+          const newCustRecord: Customer = {
+            id: createdUser.customerId,
+            name: newCompany?.name?.trim() || "New Client Account",
+            tier: (newCompany?.tier as CustomerTier) || "Bronze",
+            industry: newCompany?.industry || "General",
+            contactEmail: normalizedEmail,
+          };
+          updatedCustomers = [...state.customers, newCustRecord];
+        }
+      }
       
       set({
         users: [...state.users, createdUser],
+        customers: updatedCustomers,
         session: createdUser,
       });
       record("Registered account", "User", createdUser.id);
@@ -354,6 +378,10 @@ export const identityActions = {
       const knownIds = new Set(state.users.map((u) => u.id));
       const newUsers = dbUsers.filter((u) => !knownIds.has(u.id));
       if (newUsers.length > 0) set({ users: [...state.users, ...newUsers] });
+
+      // Sync customers — DB is authoritative
+      const dbCustomers = await customersApi.list().catch(() => []);
+      if (dbCustomers && dbCustomers.length > 0) set({ customers: dbCustomers });
 
       // Sync products — DB is authoritative
       const dbProducts = await productsApi.list();

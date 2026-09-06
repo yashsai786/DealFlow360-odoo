@@ -82,6 +82,7 @@ export interface IQuotationRepository {
 export interface ICustomerRepository {
   findById(id: string): Promise<Customer | null>;
   list(): Promise<Customer[]>;
+  create(customer: Customer): Promise<Customer>;
 }
 
 export interface IApprovalRepository {
