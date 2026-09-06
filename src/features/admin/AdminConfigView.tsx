@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   useAppState,
   adminActions,
@@ -126,15 +126,75 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
     }
   };
 
-  const handleSaveProduct = () => {
+  // Product Catalog search, category filter, and sorting
+  const [productCatalogSearch, setProductCatalogSearch] = useState<string>("");
+  const [productCategoryFilter, setProductCategoryFilter] = useState<string>("all");
+  const [productSortBy, setProductSortBy] = useState<string>("date-desc");
+
+  const filteredAndSortedProducts = useMemo(() => {
+    const searchLower = productCatalogSearch.toLowerCase().trim();
+    const filtered = state.products.filter((p) => {
+      const matchesSearch =
+        !searchLower ||
+        p.name.toLowerCase().includes(searchLower) ||
+        p.category.toLowerCase().includes(searchLower) ||
+        (p.description && p.description.toLowerCase().includes(searchLower)) ||
+        p.id.toLowerCase().includes(searchLower);
+
+      const matchesCategory =
+        productCategoryFilter === "all" || p.category === productCategoryFilter;
+
+      return matchesSearch && matchesCategory;
+    });
+
+    return [...filtered].sort((a, b) => {
+      if (productSortBy === "date-desc" || productSortBy === "date-asc") {
+        const getTime = (prod: Product) => {
+          if (prod.createdAt) {
+            const t = new Date(prod.createdAt).getTime();
+            if (!isNaN(t)) return t;
+          }
+          if (prod.id.startsWith("p-")) {
+            const num = Number(prod.id.slice(2));
+            if (!isNaN(num) && num > 1000000000) return num;
+          }
+          return 0;
+        };
+        const timeA = getTime(a);
+        const timeB = getTime(b);
+        if (timeA !== timeB) {
+          return productSortBy === "date-desc" ? timeB - timeA : timeA - timeB;
+        }
+        return productSortBy === "date-desc"
+          ? b.name.localeCompare(a.name)
+          : a.name.localeCompare(b.name);
+      } else if (productSortBy === "name-asc") {
+        return a.name.localeCompare(b.name);
+      } else if (productSortBy === "name-desc") {
+        return b.name.localeCompare(a.name);
+      } else if (productSortBy === "price-desc") {
+        return b.price - a.price;
+      } else if (productSortBy === "price-asc") {
+        return a.price - b.price;
+      } else if (productSortBy === "margin-desc") {
+        const marginA = a.price > 0 ? (a.price - a.cost) / a.price : 0;
+        const marginB = b.price > 0 ? (b.price - b.cost) / b.price : 0;
+        return marginB - marginA;
+      }
+      return 0;
+    });
+  }, [state.products, productCatalogSearch, productCategoryFilter, productSortBy]);
+
+  const handleSaveProduct = async () => {
     const p = productModal.product;
     if (!p.name.trim()) {
       toast.error("Product name is required.");
       return;
     }
     const id = productModal.isNew ? `p-${Date.now()}` : p.id;
+    const createdAt = productModal.isNew ? new Date().toISOString() : (p.createdAt || new Date().toISOString());
     try {
-      adminActions.saveProduct({ ...p, id });
+      await adminActions.saveProduct({ ...p, id, createdAt });
       toast.success(productModal.isNew ? `Created product ${p.name}` : `Updated ${p.name}`);
       setProductModal({ ...productModal, open: false });
     } catch (err: any) {
@@ -513,9 +573,12 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
         {canAccessAdminTab(role, "catalog") && (
           <TabsContent value="catalog" className="space-y-4">
           <Card className="shadow-xs">
-            <CardHeader className="p-4 pb-2 border-b border-border flex flex-row items-center justify-between">
+            <CardHeader className="p-4 pb-3 border-b border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <CardTitle className="text-xs font-semibold">Commercial Product Catalog</CardTitle>
+                <CardTitle className="text-xs font-semibold flex items-center gap-2">
+                  <Package className="h-3.5 w-3.5 text-primary" />
+                  Commercial Product Catalog
+                </CardTitle>
                 <CardDescription className="text-[11px]">
                   Base prices, direct equipment costs, category mapping, and billing cycles
                 </CardDescription>
@@ -538,12 +601,105 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
                     isNew: true,
                   })
                 }
-                className="h-7 text-xs"
+                className="h-7 text-xs shadow-xs"
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Add Product
               </Button>
             </CardHeader>
+
+            {/* Product Catalog Filters: Search bar + Category filter + Sort by date added */}
+            <div className="p-3 border-b border-border bg-muted/20 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+              <div className="relative flex-1 w-full">
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Search products by name, category, or description..."
+                  value={productCatalogSearch}
+                  onChange={(e) => setProductCatalogSearch(e.target.value)}
+                  className="pl-8 h-8 text-xs w-full bg-background shadow-2xs"
+                />
+                {productCatalogSearch && (
+                  <button
+                    onClick={() => setProductCatalogSearch("")}
+                    className="absolute right-2.5 top-1.5 text-muted-foreground hover:text-foreground text-sm font-semibold"
+                    title="Clear search"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                {/* Category filter */}
+                <Select value={productCategoryFilter} onValueChange={setProductCategoryFilter}>
+                  <SelectTrigger className="h-8 text-xs w-full sm:w-36 bg-background">
+                    <Filter className="h-3 w-3 mr-1 text-muted-foreground" />
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all" className="text-xs">All Categories</SelectItem>
+                    <SelectItem value="Hardware" className="text-xs">Hardware</SelectItem>
+                    <SelectItem value="Services" className="text-xs">Services</SelectItem>
+                    <SelectItem value="Subscriptions" className="text-xs">Subscriptions</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {/* Sort by date / name / price */}
+                <Select value={productSortBy} onValueChange={setProductSortBy}>
+                  <SelectTrigger className="h-8 text-xs w-full sm:w-52 bg-background">
+                    <ArrowUpDown className="h-3 w-3 mr-1 text-muted-foreground" />
+                    <SelectValue placeholder="Sort By" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="date-desc" className="text-xs">Date Added (Newest First)</SelectItem>
+                    <SelectItem value="date-asc" className="text-xs">Date Added (Oldest First)</SelectItem>
+                    <SelectItem value="name-asc" className="text-xs">Product Name (A-Z)</SelectItem>
+                    <SelectItem value="name-desc" className="text-xs">Product Name (Z-A)</SelectItem>
+                    <SelectItem value="price-desc" className="text-xs">Price (High to Low)</SelectItem>
+                    <SelectItem value="price-asc" className="text-xs">Price (Low to High)</SelectItem>
+                    <SelectItem value="margin-desc" className="text-xs">Gross Margin (High to Low)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Product count and active sort indicator */}
+            <div className="px-4 py-2 text-[11px] text-muted-foreground flex items-center justify-between border-b border-border/50 bg-background/50">
+              <div>
+                Showing <span className="font-semibold text-foreground">{filteredAndSortedProducts.length}</span> of{" "}
+                <span className="font-semibold text-foreground">{state.products.length}</span> products
+                {(productCatalogSearch || productCategoryFilter !== "all") && (
+                  <span
+                    className="ml-2 text-primary cursor-pointer hover:underline"
+                    onClick={() => {
+                      setProductCatalogSearch("");
+                      setProductCategoryFilter("all");
+                    }}
+                  >
+                    (Reset filters)
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 text-[10px]">
+                <Clock className="h-3 w-3 text-muted-foreground" />
+                <span>
+                  Sorted by:{" "}
+                  {productSortBy === "date-desc"
+                    ? "Newest First"
+                    : productSortBy === "date-asc"
+                      ? "Oldest First"
+                      : productSortBy === "name-asc"
+                        ? "Name (A-Z)"
+                        : productSortBy === "name-desc"
+                          ? "Name (Z-A)"
+                          : productSortBy === "price-desc"
+                            ? "Price (High to Low)"
+                            : productSortBy === "price-asc"
+                              ? "Price (Low to High)"
+                              : "Gross Margin"}
+                </span>
+              </div>
+            </div>
+
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
@@ -559,43 +715,80 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
                   </TableRow>
                 </TableHeader>
                 <TableBody className="text-xs">
-                  {state.products.map((p) => {
-                    const margin = p.price - p.cost;
-                    const marginPct = p.price > 0 ? Math.round((margin / p.price) * 100) : 0;
-                    return (
-                      <TableRow key={p.id}>
-                        <TableCell className="font-semibold">{p.name}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-[10px] font-normal py-0 px-1">
-                            {p.category}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{p.unit}</TableCell>
-                        <TableCell className="text-right font-mono font-bold">₹{p.price}</TableCell>
-                        <TableCell className="text-right font-mono text-muted-foreground">₹{p.cost}</TableCell>
-                        <TableCell className="text-right font-mono text-emerald-600">
-                          ₹{margin} ({marginPct}%)
-                        </TableCell>
-                        <TableCell className="text-right font-mono">{p.taxPct}%</TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              setProductModal({
-                                open: true,
-                                product: { ...p },
-                                isNew: false,
-                              })
-                            }
-                            className="h-6 text-[10px] px-2"
-                          >
-                            Edit
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                  {filteredAndSortedProducts.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        <div className="flex flex-col items-center justify-center gap-1.5">
+                          <Package className="h-8 w-8 text-muted-foreground/50 mb-1" />
+                          <p className="font-medium text-foreground">No products found</p>
+                          <p className="text-[11px]">
+                            {productCatalogSearch
+                              ? `No products match the search query "${productCatalogSearch}".`
+                              : "No products in this category."}
+                          </p>
+                          {(productCatalogSearch || productCategoryFilter !== "all") && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setProductCatalogSearch("");
+                                setProductCategoryFilter("all");
+                              }}
+                              className="mt-2 h-7 text-xs"
+                            >
+                              Clear Search & Filters
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredAndSortedProducts.map((p) => {
+                      const margin = p.price - p.cost;
+                      const marginPct = p.price > 0 ? Math.round((margin / p.price) * 100) : 0;
+                      return (
+                        <TableRow key={p.id}>
+                          <TableCell>
+                            <div className="font-semibold text-foreground">{p.name}</div>
+                            {p.createdAt && (
+                              <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                                <Clock className="h-2.5 w-2.5" />
+                                Added {new Date(p.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-[10px] font-normal py-0 px-1">
+                              {p.category}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{p.unit}</TableCell>
+                          <TableCell className="text-right font-mono font-bold">₹{p.price}</TableCell>
+                          <TableCell className="text-right font-mono text-muted-foreground">₹{p.cost}</TableCell>
+                          <TableCell className="text-right font-mono text-emerald-600">
+                            ₹{margin} ({marginPct}%)
+                          </TableCell>
+                          <TableCell className="text-right font-mono">{p.taxPct}%</TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                setProductModal({
+                                  open: true,
+                                  product: { ...p },
+                                  isNew: false,
+                                })
+                              }
+                              className="h-6 text-[10px] px-2"
+                            >
+                              Edit
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
                 </TableBody>
               </Table>
             </CardContent>

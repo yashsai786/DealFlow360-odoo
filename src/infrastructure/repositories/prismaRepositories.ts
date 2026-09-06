@@ -240,6 +240,7 @@ export class PrismaProductRepository implements IProductRepository {
       taxPct: row.taxPct,
       description: row.description,
       cycle: row.cycle ? (row.cycle as BillingCycle) : undefined,
+      createdAt: (row as any).createdAt ? new Date((row as any).createdAt).toISOString() : undefined,
     };
   }
 

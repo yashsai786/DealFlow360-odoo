@@ -43,6 +43,7 @@ export interface Product {
   taxPct: number;
   description: string;
   cycle?: BillingCycle | undefined;
+  createdAt?: string | undefined;
 }
 
 export interface QuotationLine {
