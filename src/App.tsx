@@ -84,6 +84,14 @@ export default function App() {
         params.set("approvalId", approvalId);
       }
 
+      // Only attach subtab if on admin
+      if (tab === "admin") {
+        const subtab = new URLSearchParams(window.location.search).get("subtab") || sessionStorage.getItem("df360_admin_subtab");
+        if (subtab) {
+          params.set("subtab", subtab);
+        }
+      }
+
       const newUrl = `${window.location.pathname}?${params.toString()}`;
       window.history.replaceState(null, "", newUrl);
 

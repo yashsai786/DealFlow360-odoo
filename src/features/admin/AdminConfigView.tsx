@@ -79,13 +79,58 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
       : canAccessAdminTab(role, "warehouses")
         ? "warehouses"
         : "governance");
-  const [activeTab, setActiveTab] = useState<string>(defaultTab);
+
+  const resolveInitialTab = (): string => {
+    if (initialTab) return initialTab;
+    if (typeof window !== "undefined") {
+      const urlSubtab = new URLSearchParams(window.location.search).get("subtab");
+      const storedSubtab = sessionStorage.getItem("df360_admin_subtab");
+      const candidate = (urlSubtab || storedSubtab) as any;
+      if (candidate && canAccessAdminTab(role, candidate)) {
+        return candidate;
+      }
+    }
+    return defaultTab;
+  };
+
+  const [activeTab, setActiveTab] = useState<string>(resolveInitialTab);
 
   useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
     }
   }, [initialTab]);
+
+  const handleTabChange = (val: string) => {
+    setActiveTab(val);
+    if (typeof window !== "undefined") {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        params.set("subtab", val);
+        const newUrl = `${window.location.pathname}?${params.toString()}`;
+        window.history.replaceState(null, "", newUrl);
+        sessionStorage.setItem("df360_admin_subtab", val);
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("tab") === "admin" || !params.get("tab")) {
+          params.set("subtab", activeTab);
+          const newUrl = `${window.location.pathname}?${params.toString()}`;
+          window.history.replaceState(null, "", newUrl);
+          sessionStorage.setItem("df360_admin_subtab", activeTab);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [activeTab]);
 
   // Edit product modal state
   const [productModal, setProductModal] = useState<{
@@ -444,7 +489,7 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
         </p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
         <TabsList className="bg-card border border-border h-9 p-0.5">
           {canAccessAdminTab(role, "governance") && (
             <TabsTrigger value="governance" className="text-xs flex items-center gap-1.5 h-8">
