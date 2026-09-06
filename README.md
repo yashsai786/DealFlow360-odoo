@@ -109,6 +109,24 @@ DealFlow360 is built using **Domain-Driven Design (DDD)** with clean separation 
 
 ---
 
+## 📐 Architecture & Data Model
+
+For the complete one-page architecture diagram, service connectivity layout, and Entity-Relationship (ERD) schema, see:
+👉 **[ARCHITECTURE.md](./ARCHITECTURE.md)**
+
+```mermaid
+graph LR
+  Q[Quotation Builder] --> G[Governance Engine]
+  Q --> U[AI Upsell Recommender]
+  G --> A[Approval Workflow]
+  A --> P[Customer Negotiation Portal]
+  P --> F[Multi-Warehouse Fulfillment]
+  F --> B[Hybrid Billing & Invoicing]
+  Q --> I[Deal Health Intelligence]
+```
+
+---
+
 ## 🧪 5-Minute Demo Flow to Showcase
 
 1. **Sign in as Sales Rep** (`rep@dealflow360.io`):
@@ -124,6 +142,15 @@ DealFlow360 is built using **Domain-Driven Design (DDD)** with clean separation 
 4. **Inspect Fulfillment & Hybrid Billing**:
    * Confirm the deal $\rightarrow$ View automated **warehouse split allocation** across regional depots.
    * View the generated **hybrid invoice** with both one-time hardware lines and recurring subscription schedules.
+
+---
+
+## 🔮 What the Team Would Build Next (With More Time)
+
+* **ERP & Accounting Webhook Integrations**: Two-way synchronization with Odoo Enterprise, SAP, and NetSuite for general ledger sync and real-time physical warehouse count updates.
+* **AI-Powered Dynamic Pricing & Elasticity Modeling**: Machine learning models predicting the optimal discount percentage to maximize win probability while preserving gross margin.
+* **Automated Document Generation**: Instant generation of binding Master Services Agreements (MSAs) and Statements of Work (SOWs) with digital signature workflows.
+* **Self-Service Multi-Tenant RBAC**: Custom organization onboarding, configurable SSO (SAML 2.0 / Okta), and user-defined approval escalation matrices.
 
 ---
 
