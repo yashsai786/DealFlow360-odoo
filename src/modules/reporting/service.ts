@@ -44,8 +44,16 @@ export interface SalesTeamConfig {
 }
 
 export const SALES_TEAMS: SalesTeamConfig[] = [
-  { id: "enterprise", name: "Enterprise Sales", repIds: ["u-rep1"] },
-  { id: "commercial", name: "Commercial & SMB", repIds: ["u-rep2"] },
+  {
+    id: "enterprise",
+    name: "Enterprise Sales",
+    repIds: ["u-rep1", "u-rep3", "u-rep8", "u-rep10"],
+  },
+  {
+    id: "commercial",
+    name: "Commercial & SMB",
+    repIds: ["u-rep2", "u-rep4", "u-rep5", "u-rep6", "u-rep7", "u-rep9"],
+  },
 ];
 
 export interface BestSellingProduct {
