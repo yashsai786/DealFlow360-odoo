@@ -59,6 +59,8 @@ import {
   Star,
   TrendingUp,
   ArrowRight,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import type { RecommendationRule } from "../../modules/recommendations/service";
 import { toast } from "sonner";
@@ -230,6 +232,19 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
     });
   }, [state.products, productCatalogSearch, productCategoryFilter, productSortBy]);
 
+  const PRODUCT_PAGE_SIZE = 20;
+  const [productPage, setProductPage] = useState<number>(1);
+
+  useEffect(() => {
+    setProductPage(1);
+  }, [productCatalogSearch, productCategoryFilter, productSortBy]);
+
+  const totalProductPages = Math.max(1, Math.ceil(filteredAndSortedProducts.length / PRODUCT_PAGE_SIZE));
+  const pagedProducts = useMemo(() => {
+    const start = (productPage - 1) * PRODUCT_PAGE_SIZE;
+    return filteredAndSortedProducts.slice(start, start + PRODUCT_PAGE_SIZE);
+  }, [filteredAndSortedProducts, productPage]);
+
   const handleSaveProduct = async () => {
     const p = productModal.product;
     if (!p.name.trim()) {
@@ -306,6 +321,59 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
   const [stockSearch, setStockSearch] = useState<string>("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
+  const inventoryMap = useMemo(() => {
+    const map = new Map<string, (typeof state.inventory)[0]>();
+    for (const item of state.inventory) {
+      map.set(`${item.warehouseId}_${item.productId}`, item);
+    }
+    return map;
+  }, [state.inventory]);
+
+  const allStockRows = useMemo(() => {
+    const targetWarehouses =
+      warehouseFilter === "all"
+        ? state.warehouses
+        : state.warehouses.filter((w) => w.id === warehouseFilter);
+
+    const sLower = stockSearch.trim().toLowerCase();
+    const filteredProducts = state.products.filter((p) => {
+      const matchSearch =
+        !sLower ||
+        p.name.toLowerCase().includes(sLower) ||
+        p.id.toLowerCase().includes(sLower);
+      const matchCat =
+        categoryFilter === "all" || p.category === categoryFilter;
+      return matchSearch && matchCat;
+    });
+
+    return targetWarehouses.flatMap((wh) =>
+      filteredProducts.map((prod) => {
+        const invItem = inventoryMap.get(`${wh.id}_${prod.id}`);
+        return {
+          warehouse: wh,
+          product: prod,
+          available: invItem?.available ?? 0,
+          reserved: invItem?.reserved ?? 0,
+          replenishmentDays: invItem?.replenishmentDays ?? 7,
+          isConfigured: !!invItem,
+        };
+      })
+    );
+  }, [state.warehouses, warehouseFilter, state.products, stockSearch, categoryFilter, inventoryMap]);
+
+  const STOCK_PAGE_SIZE = 20;
+  const [stockPage, setStockPage] = useState<number>(1);
+
+  useEffect(() => {
+    setStockPage(1);
+  }, [warehouseFilter, stockSearch, categoryFilter]);
+
+  const totalStockPages = Math.max(1, Math.ceil(allStockRows.length / STOCK_PAGE_SIZE));
+  const pagedStockRows = useMemo(() => {
+    const start = (stockPage - 1) * STOCK_PAGE_SIZE;
+    return allStockRows.slice(start, start + STOCK_PAGE_SIZE);
+  }, [allStockRows, stockPage]);
+
   // Stock edit tracking map: `${warehouseId}_${productId}` -> { available, replenishmentDays }
   const [stockEdits, setStockEdits] = useState<Record<string, { available: number; replenishmentDays: number }>>({});
 
@@ -326,9 +394,10 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
 
   const handleStockChange = (warehouseId: string, productId: string, field: "available" | "replenishmentDays", value: number) => {
     const key = `${warehouseId}_${productId}`;
+    const invItem = inventoryMap.get(key);
     const current = stockEdits[key] || {
-      available: state.inventory.find((i) => i.warehouseId === warehouseId && i.productId === productId)?.available ?? 0,
-      replenishmentDays: state.inventory.find((i) => i.warehouseId === warehouseId && i.productId === productId)?.replenishmentDays ?? 7,
+      available: invItem?.available ?? 0,
+      replenishmentDays: invItem?.replenishmentDays ?? 7,
     };
     setStockEdits({
       ...stockEdits,
@@ -337,6 +406,47 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
         [field]: Math.max(0, value),
       },
     });
+  };
+
+  // Add warehouse depot modal state
+  const [warehouseModal, setWarehouseModal] = useState<{
+    open: boolean;
+    name: string;
+    location: string;
+    shipmentCost: number;
+  }>({
+    open: false,
+    name: "",
+    location: "",
+    shipmentCost: 150,
+  });
+
+  const handleCreateWarehouse = async () => {
+    if (!warehouseModal.name.trim()) {
+      toast.error("Depot name is required.");
+      return;
+    }
+    if (!warehouseModal.location.trim()) {
+      toast.error("Location hub is required.");
+      return;
+    }
+    try {
+      await adminActions.createWarehouse({
+        id: "",
+        name: warehouseModal.name.trim(),
+        location: warehouseModal.location.trim(),
+        shipmentCost: Number(warehouseModal.shipmentCost) || 0,
+      });
+      toast.success(`Created warehouse depot ${warehouseModal.name.trim()}`);
+      setWarehouseModal({
+        open: false,
+        name: "",
+        location: "",
+        shipmentCost: 150,
+      });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to create warehouse depot");
+    }
   };
 
   const handleSaveStock = async (warehouseId: string, productId: string) => {
@@ -788,7 +898,7 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredAndSortedProducts.map((p) => {
+                    pagedProducts.map((p) => {
                       const margin = p.price - p.cost;
                       const marginPct = p.price > 0 ? Math.round((margin / p.price) * 100) : 0;
                       return (
@@ -837,6 +947,42 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
                 </TableBody>
               </Table>
             </CardContent>
+
+            {/* Product Catalog Pagination Bar */}
+            {filteredAndSortedProducts.length > PRODUCT_PAGE_SIZE && (
+              <div className="p-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground bg-muted/10">
+                <div>
+                  Showing <span className="font-semibold text-foreground">{(productPage - 1) * PRODUCT_PAGE_SIZE + 1}</span> to{" "}
+                  <span className="font-semibold text-foreground">
+                    {Math.min(productPage * PRODUCT_PAGE_SIZE, filteredAndSortedProducts.length)}
+                  </span>{" "}
+                  of <span className="font-semibold text-foreground">{filteredAndSortedProducts.length}</span> products
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={productPage <= 1}
+                    onClick={() => setProductPage((p) => Math.max(1, p - 1))}
+                    className="h-7 px-2 text-xs gap-1"
+                  >
+                    <ChevronLeft className="h-3 w-3" /> Prev
+                  </Button>
+                  <span className="px-2 font-mono text-xs font-medium text-foreground">
+                    {productPage} / {totalProductPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={productPage >= totalProductPages}
+                    onClick={() => setProductPage((p) => Math.min(totalProductPages, p + 1))}
+                    className="h-7 px-2 text-xs gap-1"
+                  >
+                    Next <ChevronRight className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         </TabsContent>
         )}
@@ -857,9 +1003,28 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
                     Multi-depot shipping freight rates evaluated by the cost-optimal split fulfillment engine
                   </CardDescription>
                 </div>
-                <Badge variant="outline" className="text-[11px] font-mono w-fit">
-                  {state.warehouses.length} Active Depots
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[11px] font-mono w-fit">
+                    {state.warehouses.length} Active Depots
+                  </Badge>
+                  {role === "ADMIN" && (
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        setWarehouseModal({
+                          open: true,
+                          name: "",
+                          location: "",
+                          shipmentCost: 150,
+                        })
+                      }
+                      className="h-7 text-xs shadow-xs"
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-1" />
+                      Add Depot
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="p-4">
@@ -1005,49 +1170,14 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(() => {
-                    const targetWarehouses =
-                      warehouseFilter === "all"
-                        ? state.warehouses
-                        : state.warehouses.filter((w) => w.id === warehouseFilter);
-
-                    const filteredProducts = state.products.filter((p) => {
-                      const matchSearch =
-                        !stockSearch.trim() ||
-                        p.name.toLowerCase().includes(stockSearch.toLowerCase()) ||
-                        p.id.toLowerCase().includes(stockSearch.toLowerCase());
-                      const matchCat =
-                        categoryFilter === "all" || p.category === categoryFilter;
-                      return matchSearch && matchCat;
-                    });
-
-                    const rows = targetWarehouses.flatMap((wh) =>
-                      filteredProducts.map((prod) => {
-                        const invItem = state.inventory.find(
-                          (i) => i.warehouseId === wh.id && i.productId === prod.id
-                        );
-                        return {
-                          warehouse: wh,
-                          product: prod,
-                          available: invItem?.available ?? 0,
-                          reserved: invItem?.reserved ?? 0,
-                          replenishmentDays: invItem?.replenishmentDays ?? 7,
-                          isConfigured: !!invItem,
-                        };
-                      })
-                    );
-
-                    if (rows.length === 0) {
-                      return (
-                        <TableRow>
-                          <TableCell colSpan={7} className="h-32 text-center text-xs text-muted-foreground">
-                            No products or inventory match the selected filter criteria.
-                          </TableCell>
-                        </TableRow>
-                      );
-                    }
-
-                    return rows.map((row) => {
+                  {pagedStockRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="h-32 text-center text-xs text-muted-foreground">
+                        No products or inventory match the selected filter criteria.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    pagedStockRows.map((row) => {
                       const editKey = `${row.warehouse.id}_${row.product.id}`;
                       const edit = stockEdits[editKey];
                       const availableVal = edit !== undefined ? edit.available : row.available;
@@ -1207,11 +1337,47 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
                           </TableCell>
                         </TableRow>
                       );
-                    });
-                  })()}
+                    })
+                  )}
                 </TableBody>
               </Table>
             </CardContent>
+
+            {/* Stock Matrix Pagination Bar */}
+            {allStockRows.length > STOCK_PAGE_SIZE && (
+              <div className="p-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground bg-muted/10">
+                <div>
+                  Showing <span className="font-semibold text-foreground">{(stockPage - 1) * STOCK_PAGE_SIZE + 1}</span> to{" "}
+                  <span className="font-semibold text-foreground">
+                    {Math.min(stockPage * STOCK_PAGE_SIZE, allStockRows.length)}
+                  </span>{" "}
+                  of <span className="font-semibold text-foreground">{allStockRows.length}</span> allocations
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={stockPage <= 1}
+                    onClick={() => setStockPage((p) => Math.max(1, p - 1))}
+                    className="h-7 px-2 text-xs gap-1"
+                  >
+                    <ChevronLeft className="h-3 w-3" /> Prev
+                  </Button>
+                  <span className="px-2 font-mono text-xs font-medium text-foreground">
+                    {stockPage} / {totalStockPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={stockPage >= totalStockPages}
+                    onClick={() => setStockPage((p) => Math.min(totalStockPages, p + 1))}
+                    className="h-7 px-2 text-xs gap-1"
+                  >
+                    Next <ChevronRight className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         </TabsContent>
         )}
@@ -2229,6 +2395,82 @@ export function AdminConfigView({ initialTab }: AdminConfigViewProps = {}) {
               className="text-xs bg-primary text-primary-foreground"
             >
               Add Pairing Rule
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Warehouse Depot Modal */}
+      <Dialog open={warehouseModal.open} onOpenChange={(open) => setWarehouseModal({ ...warehouseModal, open })}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-2">
+              <Building className="h-4 w-4 text-primary" />
+              Add Fulfillment Depot
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Register a new regional warehouse facility and configure its base shipping freight surcharge.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3.5 py-2 text-xs">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold text-foreground">Depot Facility Name</label>
+              <Input
+                placeholder="e.g. Pune Regional Logistics Hub"
+                value={warehouseModal.name}
+                onChange={(e) => setWarehouseModal({ ...warehouseModal, name: e.target.value })}
+                className="h-8 text-xs"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold text-foreground">Location / Transit Hub</label>
+              <Input
+                placeholder="e.g. Pune Hub, Maharashtra"
+                value={warehouseModal.location}
+                onChange={(e) => setWarehouseModal({ ...warehouseModal, location: e.target.value })}
+                className="h-8 text-xs"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold text-foreground">Base Freight Surcharge (₹)</label>
+              <Input
+                type="number"
+                min={0}
+                placeholder="150"
+                value={warehouseModal.shipmentCost}
+                onChange={(e) =>
+                  setWarehouseModal({
+                    ...warehouseModal,
+                    shipmentCost: parseFloat(e.target.value) || 0,
+                  })
+                }
+                className="h-8 text-xs font-mono"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Flat shipping freight cost evaluated by the multi-depot split fulfillment optimizer.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setWarehouseModal({ ...warehouseModal, open: false })}
+              className="h-8 text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleCreateWarehouse}
+              className="h-8 text-xs shadow-xs"
+            >
+              <Building className="h-3.5 w-3.5 mr-1" />
+              Create Depot
             </Button>
           </DialogFooter>
         </DialogContent>

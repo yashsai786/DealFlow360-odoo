@@ -120,14 +120,17 @@ function loadState(): AppState {
   return defaults;
 }
 
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
 function saveState(s: AppState) {
-  if (typeof window !== "undefined" && window.localStorage) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
     } catch (e) {
       console.warn("[DealFlow360] Could not persist local state:", e);
     }
-  }
+  }, 250);
 }
 
 let state: AppState = loadState();
@@ -158,14 +161,40 @@ export function useAppState() {
 
 /* ------------------------------------------------------------------ helpers */
 
+let cachedProductsRef: Product[] | null = null;
+let cachedProductMap: Record<string, Product> = {};
+
 export function productMap(s: AppState = state): Record<string, Product> {
-  return Object.fromEntries(s.products.map((p) => [p.id, p]));
+  if (s.products === cachedProductsRef) {
+    return cachedProductMap;
+  }
+  cachedProductsRef = s.products;
+  cachedProductMap = Object.fromEntries(s.products.map((p) => [p.id, p]));
+  return cachedProductMap;
 }
+
+let cachedCustomersRef: Customer[] | null = null;
+let cachedCustomerMap: Record<string, Customer> = {};
+
 export function customerMap(s: AppState = state): Record<string, Customer> {
-  return Object.fromEntries(s.customers.map((c) => [c.id, c]));
+  if (s.customers === cachedCustomersRef) {
+    return cachedCustomerMap;
+  }
+  cachedCustomersRef = s.customers;
+  cachedCustomerMap = Object.fromEntries(s.customers.map((c) => [c.id, c]));
+  return cachedCustomerMap;
 }
+
+let cachedUsersRef: User[] | null = null;
+let cachedUserMap: Record<string, User> = {};
+
 export function userMap(s: AppState = state): Record<string, User> {
-  return Object.fromEntries(s.users.map((u) => [u.id, u]));
+  if (s.users === cachedUsersRef) {
+    return cachedUserMap;
+  }
+  cachedUsersRef = s.users;
+  cachedUserMap = Object.fromEntries(s.users.map((u) => [u.id, u]));
+  return cachedUserMap;
 }
 
 export function tierOf(s: AppState, quotation: Quotation): CustomerTier {
@@ -373,66 +402,88 @@ export const identityActions = {
     if (isSyncing) return;
     isSyncing = true;
     try {
-      // Sync users from DB (merge new DB-only users into local state)
-      const dbUsers = await usersApi.list();
-      const knownIds = new Set(state.users.map((u) => u.id));
-      const newUsers = dbUsers.filter((u) => !knownIds.has(u.id));
-      if (newUsers.length > 0) set({ users: [...state.users, ...newUsers] });
+      const [
+        usersRes,
+        customersRes,
+        productsRes,
+        warehousesRes,
+        inventoryRes,
+        plansRes,
+        subscriptionsRes,
+        governanceRes,
+        quotationsRes,
+        approvalsRes,
+        ordersRes,
+        auditRes,
+      ] = await Promise.allSettled([
+        usersApi.list(),
+        customersApi.list(),
+        productsApi.list(),
+        warehousesApi.list(),
+        inventoryApi.list(),
+        plansApi.list(),
+        subscriptionsApi.list(),
+        governanceApi.load(),
+        quotationsApi.list(),
+        approvalsApi.list(),
+        fulfillmentApi.list(),
+        auditApi.list(),
+      ]);
 
-      // Sync customers — DB is authoritative
-      const dbCustomers = await customersApi.list().catch(() => []);
-      if (dbCustomers && dbCustomers.length > 0) set({ customers: dbCustomers });
+      const patch: Partial<AppState> = {};
 
-      // Sync products — DB is authoritative
-      const dbProducts = await productsApi.list();
-      if (dbProducts.length > 0) set({ products: dbProducts });
-
-      // Sync warehouses — DB is authoritative
-      const dbWarehouses = await warehousesApi.list();
-      if (dbWarehouses.length > 0) set({ warehouses: dbWarehouses });
-
-      // Sync inventory — DB is authoritative
-      const dbInventory = await inventoryApi.list();
-      if (dbInventory && dbInventory.length > 0) {
-        set({ inventory: dbInventory });
+      if (usersRes.status === "fulfilled" && usersRes.value && usersRes.value.length > 0) {
+        const knownIds = new Set(state.users.map((u) => u.id));
+        const newUsers = usersRes.value.filter((u) => !knownIds.has(u.id));
+        if (newUsers.length > 0) patch.users = [...state.users, ...newUsers];
       }
 
-      // Sync subscription plans — DB is authoritative
-      const dbPlans = await plansApi.list();
-      if (dbPlans.length > 0) set({ plans: dbPlans });
-
-      // Sync subscriptions — DB is authoritative
-      const dbSubscriptions = await subscriptionsApi.list();
-      if (dbSubscriptions && dbSubscriptions.length > 0) {
-        set({ subscriptions: dbSubscriptions });
+      if (customersRes.status === "fulfilled" && customersRes.value && customersRes.value.length > 0) {
+        patch.customers = customersRes.value;
       }
 
-      // Sync governance config — DB is authoritative over seed defaults
-      const dbGovernance = await governanceApi.load();
-      set({ governance: dbGovernance });
-
-      // Sync quotations — DB is authoritative
-      const dbQuotations = await quotationsApi.list();
-      if (dbQuotations && dbQuotations.length > 0) {
-        set({ quotations: dbQuotations });
+      if (productsRes.status === "fulfilled" && productsRes.value && productsRes.value.length > 0) {
+        patch.products = productsRes.value;
       }
 
-      // Sync approvals — DB is authoritative
-      const dbApprovals = await approvalsApi.list();
-      if (dbApprovals && dbApprovals.length > 0) {
-        set({ approvals: dbApprovals });
+      if (warehousesRes.status === "fulfilled" && warehousesRes.value && warehousesRes.value.length > 0) {
+        patch.warehouses = warehousesRes.value;
       }
 
-      // Sync fulfillment orders — DB is authoritative
-      const dbOrders = await fulfillmentApi.list();
-      if (dbOrders && dbOrders.length > 0) {
-        set({ orders: dbOrders });
+      if (inventoryRes.status === "fulfilled" && inventoryRes.value && inventoryRes.value.length > 0) {
+        patch.inventory = inventoryRes.value;
       }
 
-      // Sync audit trail — DB is authoritative
-      const dbAudit = await auditApi.list();
-      if (dbAudit && dbAudit.length > 0) {
-        set({ audit: dbAudit });
+      if (plansRes.status === "fulfilled" && plansRes.value && plansRes.value.length > 0) {
+        patch.plans = plansRes.value;
+      }
+
+      if (subscriptionsRes.status === "fulfilled" && subscriptionsRes.value && subscriptionsRes.value.length > 0) {
+        patch.subscriptions = subscriptionsRes.value;
+      }
+
+      if (governanceRes.status === "fulfilled" && governanceRes.value) {
+        patch.governance = governanceRes.value;
+      }
+
+      if (quotationsRes.status === "fulfilled" && quotationsRes.value && quotationsRes.value.length > 0) {
+        patch.quotations = quotationsRes.value;
+      }
+
+      if (approvalsRes.status === "fulfilled" && approvalsRes.value && approvalsRes.value.length > 0) {
+        patch.approvals = approvalsRes.value;
+      }
+
+      if (ordersRes.status === "fulfilled" && ordersRes.value && ordersRes.value.length > 0) {
+        patch.orders = ordersRes.value;
+      }
+
+      if (auditRes.status === "fulfilled" && auditRes.value && auditRes.value.length > 0) {
+        patch.audit = auditRes.value;
+      }
+
+      if (Object.keys(patch).length > 0) {
+        set(patch);
       }
     } catch (error) {
       console.error("[DealFlow360] syncWithDatabase failed:", error);
@@ -1525,6 +1576,15 @@ export const adminActions = {
     const saved = await warehousesApi.update(warehouse);
     set({ warehouses: state.warehouses.map((w) => (w.id === saved.id ? saved : w)) });
     record(`Updated ${saved.name}`, "Warehouse", saved.id);
+  },
+
+  async createWarehouse(warehouse: Warehouse) {
+    const user = requireSession();
+    assertCan(user.role, "admin.configure");
+    const created = await warehousesApi.create(warehouse);
+    set({ warehouses: [...state.warehouses, created] });
+    record(`Added warehouse depot ${created.name} (${created.location})`, "Warehouse", created.id);
+    return created;
   },
 
   async createPlan(plan: SubscriptionPlan) {

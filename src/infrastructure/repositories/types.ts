@@ -41,6 +41,7 @@ export interface IProductRepository {
 
 export interface IWarehouseRepository {
   list(): Promise<Warehouse[]>;
+  create(warehouse: Warehouse): Promise<Warehouse>;
   update(warehouse: Warehouse): Promise<Warehouse>;
 }
 

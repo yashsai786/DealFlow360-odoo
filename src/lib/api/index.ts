@@ -74,6 +74,11 @@ export const productsApi = {
 /* ----------------------------------------------- WAREHOUSES API CLIENT */
 export const warehousesApi = {
   list: () => apiClient<Warehouse[]>("/api/warehouses"),
+  create: (warehouse: Warehouse) =>
+    apiClient<Warehouse>("/api/warehouses", {
+      method: "POST",
+      body: JSON.stringify(warehouse),
+    }),
   update: (warehouse: Warehouse) =>
     apiClient<Warehouse>("/api/warehouses", {
       method: "PATCH",

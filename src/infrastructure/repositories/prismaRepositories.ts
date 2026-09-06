@@ -283,6 +283,18 @@ export class PrismaWarehouseRepository implements IWarehouseRepository {
     }));
   }
 
+  async create(warehouse: Warehouse): Promise<Warehouse> {
+    const row = await prisma.warehouse.create({
+      data: {
+        id: warehouse.id,
+        name: warehouse.name,
+        location: warehouse.location,
+        shipmentCost: warehouse.shipmentCost,
+      },
+    });
+    return { id: row.id, name: row.name, location: row.location, shipmentCost: row.shipmentCost };
+  }
+
   async update(warehouse: Warehouse): Promise<Warehouse> {
     const row = await prisma.warehouse.update({
       where: { id: warehouse.id },

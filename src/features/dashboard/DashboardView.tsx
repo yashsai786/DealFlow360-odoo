@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   useAppState,
   productMap,
@@ -34,31 +34,52 @@ export function DashboardView({ onNavigate }: DashboardViewProps) {
   const products = productMap(state);
   const customers = customerMap(state);
 
-  const pendingApprovals = state.approvals.filter((a) => a.status === "PENDING");
-  const awaitingOrders = state.orders.filter(
-    (o) => o.status === "AWAITING" || o.status === "BACKORDERED",
+  const pendingApprovals = useMemo(
+    () => state.approvals.filter((a) => a.status === "PENDING"),
+    [state.approvals]
+  );
+  const awaitingOrders = useMemo(
+    () => state.orders.filter((o) => o.status === "AWAITING" || o.status === "BACKORDERED"),
+    [state.orders]
   );
 
-  const totalPipeline = state.quotations
-    .filter((q) => !["PAID", "CANCELLED"].includes(q.stage))
-    .reduce((sum, q) => sum + totalsOf(state, q).total, 0);
+  const totalPipeline = useMemo(
+    () =>
+      state.quotations
+        .filter((q) => !["PAID", "CANCELLED"].includes(q.stage))
+        .reduce((sum, q) => sum + totalsOf(state, q).total, 0),
+    [state.quotations, state.products]
+  );
 
-  const totalRevenue = state.invoices
-    .filter((i) => i.status === "PAID" || i.status === "PARTIALLY_PAID")
-    .reduce(
-      (sum, i) =>
-        sum + i.payments.reduce((pSum, p) => pSum + p.amount, 0),
-      0,
-    );
+  const totalRevenue = useMemo(
+    () =>
+      state.invoices
+        .filter((i) => i.status === "PAID" || i.status === "PARTIALLY_PAID")
+        .reduce(
+          (sum, i) =>
+            sum + i.payments.reduce((pSum, p) => pSum + p.amount, 0),
+          0,
+        ),
+    [state.invoices]
+  );
 
-  const dealAlerts = calculateDealHealth({
-    quotations: state.quotations,
-    products,
-    customers,
-    users: Object.fromEntries(state.users.map((u) => [u.id, u])),
-    orders: state.orders,
-    approvals: state.approvals,
-  });
+  const usersMap = useMemo(
+    () => Object.fromEntries(state.users.map((u) => [u.id, u])),
+    [state.users]
+  );
+
+  const dealAlerts = useMemo(
+    () =>
+      calculateDealHealth({
+        quotations: state.quotations,
+        products,
+        customers,
+        users: usersMap,
+        orders: state.orders,
+        approvals: state.approvals,
+      }),
+    [state.quotations, products, customers, usersMap, state.orders, state.approvals]
+  );
 
   const handleNudge = (quotationId: string) => {
     try {

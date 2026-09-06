@@ -258,13 +258,8 @@ while (GENERATED_PRODUCTS.length < 215) {
   });
 }
 
-export const PRODUCTS: Product[] = GENERATED_PRODUCTS.map((p, index) => {
-  const daysAgo = Math.max(1, Math.round((GENERATED_PRODUCTS.length - index) * 0.8));
-  return {
-    ...p,
-    createdAt: p.createdAt || ago(daysAgo),
-  };
-});
+export const PRODUCTS: Product[] = GENERATED_PRODUCTS;
+
 
 // ==========================================
 // 4. WAREHOUSES (5 Regional Logistics Centers)
