@@ -55,17 +55,35 @@ import { toast } from "sonner";
  * - Under Review: Exceeds discount ceilings, pending managerial sign-off
  * - Confirmed: Finalized order moving to fulfillment
  */
-export function getCustomerStatus(quotation: Quotation, relatedApproval?: Approval | null): {
-  label: "Sent" | "Under Negotiation" | "Under Review" | "Confirmed" | "Revision Required" | "Cancelled";
+export function isDealDone(q: Quotation, invoices: Invoice[] = []): boolean {
+  if (q.stage === "PAID" || q.stage === "CANCELLED") return true;
+  const inv = invoices.find((i) => i.quotationId === q.id);
+  if (inv && inv.status === "PAID") return true;
+  return false;
+}
+
+export function getCustomerStatus(
+  quotation: Quotation,
+  relatedApproval?: Approval | null,
+  isPaid?: boolean,
+): {
+  label: "Sent" | "Under Negotiation" | "Under Review" | "Confirmed" | "Paid & Closed" | "Revision Required" | "Cancelled";
   variant: "default" | "secondary" | "outline" | "destructive";
   badgeClass: string;
   description: string;
 } {
+  if (quotation.stage === "PAID" || isPaid) {
+    return {
+      label: "Paid & Closed",
+      variant: "default",
+      badgeClass: "bg-emerald-700 hover:bg-emerald-700 text-white font-semibold",
+      description: "Payment settled and commercial deal completed.",
+    };
+  }
   if (
     quotation.stage === "CONFIRMED" ||
     quotation.stage === "FULFILLMENT" ||
-    quotation.stage === "INVOICED" ||
-    quotation.stage === "PAID"
+    quotation.stage === "INVOICED"
   ) {
     return {
       label: "Confirmed",
@@ -138,8 +156,21 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
   const customer = customers[myCustomerId];
   const myQuotations = state.quotations.filter((q) => q.customerId === myCustomerId);
 
+  // Filter completed/paid deals out of default active list
+  const activeQuotations = useMemo(
+    () => myQuotations.filter((q) => !isDealDone(q, state.invoices)),
+    [myQuotations, state.invoices]
+  );
+
+  const [proposalFilter, setProposalFilter] = useState<"ACTIVE" | "ALL">("ACTIVE");
+
+  const baseQuotations = useMemo(
+    () => (proposalFilter === "ACTIVE" ? activeQuotations : myQuotations),
+    [proposalFilter, activeQuotations, myQuotations]
+  );
+
   const [selectedQuoteId, setSelectedQuoteId] = useState<string>(
-    initialQuoteId || myQuotations[0]?.id || "",
+    initialQuoteId || activeQuotations[0]?.id || myQuotations[0]?.id || "",
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"proposals" | "orders">("proposals");
@@ -215,39 +246,52 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
 
   // Sync selectedQuoteId if list changes
   useEffect(() => {
-    if (!selectedQuoteId && myQuotations.length > 0) {
-      setSelectedQuoteId(myQuotations[0]!.id);
+    if (!selectedQuoteId && baseQuotations.length > 0) {
+      setSelectedQuoteId(baseQuotations[0]!.id);
+    } else if (selectedQuoteId && !baseQuotations.some((q) => q.id === selectedQuoteId)) {
+      if (baseQuotations.length > 0) {
+        setSelectedQuoteId(baseQuotations[0]!.id);
+      } else {
+        setSelectedQuoteId("");
+      }
     }
-  }, [myQuotations, selectedQuoteId]);
+  }, [baseQuotations, selectedQuoteId]);
 
-  const filteredQuotations = myQuotations.filter((q) => {
-    if (!searchQuery.trim()) return true;
-    const term = searchQuery.toLowerCase().trim();
-    const qTotals = totalsOf(state, q);
-    const qStatus = getCustomerStatus(q);
-    const hasMatchingProduct = q.lines.some((l) => {
-      const p = products[l.productId];
-      return p?.name.toLowerCase().includes(term) || l.productId.toLowerCase().includes(term);
+  const filteredQuotations = useMemo(() => {
+    return baseQuotations.filter((q) => {
+      if (!searchQuery.trim()) return true;
+      const term = searchQuery.toLowerCase().trim();
+      const qTotals = totalsOf(state, q);
+      const isPaid = q.stage === "PAID" || state.invoices.some((i) => i.quotationId === q.id && i.status === "PAID");
+      const qStatus = getCustomerStatus(q, null, isPaid);
+      const hasMatchingProduct = q.lines.some((l) => {
+        const p = products[l.productId];
+        return p?.name.toLowerCase().includes(term) || l.productId.toLowerCase().includes(term);
+      });
+      return (
+        q.number.toLowerCase().includes(term) ||
+        qStatus.label.toLowerCase().includes(term) ||
+        qTotals.total.toString().includes(term) ||
+        hasMatchingProduct
+      );
     });
-    return (
-      q.number.toLowerCase().includes(term) ||
-      qStatus.label.toLowerCase().includes(term) ||
-      qTotals.total.toString().includes(term) ||
-      hasMatchingProduct
-    );
-  });
+  }, [baseQuotations, searchQuery, state, products]);
 
   const quotation = myQuotations.find((q) => q.id === selectedQuoteId);
   const relatedApproval = quotation
     ? state.approvals.find((a) => a.quotationId === quotation.id)
     : null;
+  const isSelectedQuotePaid = quotation
+    ? quotation.stage === "PAID" || state.invoices.some((i) => i.quotationId === quotation.id && i.status === "PAID")
+    : false;
   const totals = quotation ? totalsOf(state, quotation) : null;
-  const statusInfo = quotation ? getCustomerStatus(quotation, relatedApproval) : null;
+  const statusInfo = quotation ? getCustomerStatus(quotation, relatedApproval, isSelectedQuotePaid) : null;
   const isLocked =
     quotation?.stage === "CONFIRMED" ||
     quotation?.stage === "FULFILLMENT" ||
     quotation?.stage === "INVOICED" ||
-    quotation?.stage === "PAID";
+    quotation?.stage === "PAID" ||
+    isSelectedQuotePaid;
 
   // Find feedback from returned or rejected approval steps
   const returnedStep = relatedApproval?.steps
@@ -474,7 +518,7 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
           }`}
         >
           <FileText className="h-4 w-4" />
-          Commercial Proposals ({filteredQuotations.length})
+          Commercial Proposals ({activeQuotations.length} Active)
         </button>
 
         <button
@@ -504,13 +548,39 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
                 </span>
                 {searchQuery && (
                   <span className="text-[10px] text-muted-foreground font-normal">
-                    Filtering {filteredQuotations.length} of {myQuotations.length}
+                    Filtering {filteredQuotations.length} of {baseQuotations.length}
                   </span>
                 )}
               </CardTitle>
               <CardDescription className="text-[11px] mt-0.5">
                 Select a quote to review terms or propose adjustments
               </CardDescription>
+            </div>
+
+            {/* Filter Toggle: Active Deals vs All / History */}
+            <div className="flex items-center p-0.5 bg-muted/60 rounded-lg border border-border/50 text-xs">
+              <button
+                type="button"
+                onClick={() => setProposalFilter("ACTIVE")}
+                className={`flex-1 py-1 px-2 text-center rounded-md font-medium transition-all cursor-pointer ${
+                  proposalFilter === "ACTIVE"
+                    ? "bg-background text-foreground shadow-xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Active Deals ({activeQuotations.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setProposalFilter("ALL")}
+                className={`flex-1 py-1 px-2 text-center rounded-md font-medium transition-all cursor-pointer ${
+                  proposalFilter === "ALL"
+                    ? "bg-background text-foreground shadow-xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                All / History ({myQuotations.length})
+              </button>
             </div>
 
             {/* In-page Search Bar for Customer Screen */}
@@ -535,17 +605,45 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
           </CardHeader>
           <CardContent className="p-2 space-y-1.5">
             {filteredQuotations.length === 0 ? (
-              <div className="p-6 text-center text-xs text-muted-foreground space-y-1">
+              <div className="p-6 text-center text-xs text-muted-foreground space-y-2">
                 <Search className="h-5 w-5 mx-auto opacity-30 mb-1" />
-                <p className="font-medium text-foreground">No proposals found</p>
-                <p className="text-[11px]">No quotations match &ldquo;{searchQuery}&rdquo;</p>
+                <p className="font-medium text-foreground">
+                  {proposalFilter === "ACTIVE"
+                    ? "No active commercial proposals"
+                    : "No proposals found"}
+                </p>
+                <p className="text-[11px] leading-relaxed">
+                  {proposalFilter === "ACTIVE"
+                    ? "All your proposals have been confirmed, paid, and closed. You can track deliveries and invoices in Order History."
+                    : `No quotations match "${searchQuery}"`}
+                </p>
+                {proposalFilter === "ACTIVE" && myQuotations.length > 0 && (
+                  <div className="pt-2 flex flex-col gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => setActiveTab("orders")}
+                    >
+                      <PackageCheck className="h-3.5 w-3.5 mr-1" /> View Order & Delivery History
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => setProposalFilter("ALL")}
+                      className="text-[11px] text-primary hover:underline cursor-pointer"
+                    >
+                      View past closed proposals ({myQuotations.length})
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               filteredQuotations.map((q) => {
               const active = q.id === selectedQuoteId;
               const qTotals = totalsOf(state, q);
               const qApproval = state.approvals.find((a) => a.quotationId === q.id);
-              const qStatus = getCustomerStatus(q, qApproval);
+              const isQuotePaid = q.stage === "PAID" || state.invoices.some((i) => i.quotationId === q.id && i.status === "PAID");
+              const qStatus = getCustomerStatus(q, qApproval, isQuotePaid);
 
               return (
                 <div
@@ -634,10 +732,10 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
                         {isSubmitting ? "Processing..." : "Confirm Quotation"}
                       </Button>
                     ) : (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 text-xs py-1 px-2.5 flex items-center gap-1">
                           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                          Order Confirmed
+                          {isSelectedQuotePaid ? "Paid & Closed" : "Order Confirmed"}
                         </Badge>
                         <Button
                           size="sm"
@@ -654,6 +752,15 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
                         >
                           <Receipt className="h-3.5 w-3.5" />
                           View Invoice & Receipt
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setActiveTab("orders")}
+                          className="h-8 text-xs flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <PackageCheck className="h-3.5 w-3.5" />
+                          Track Order
                         </Button>
                       </div>
                     )}
@@ -929,8 +1036,30 @@ export function CustomerPortalView({ initialQuoteId }: CustomerPortalViewProps =
               </Card>
             </>
           ) : (
-            <Card className="shadow-xs border-border p-12 text-center text-muted-foreground text-xs">
-              Select a commercial proposal from the left to view terms and submit negotiation requests.
+            <Card className="shadow-xs border-border p-12 text-center text-muted-foreground text-xs space-y-3">
+              <CheckCircle2 className="h-10 w-10 mx-auto text-emerald-500/50" />
+              <div className="space-y-1">
+                <p className="font-semibold text-foreground text-sm">
+                  {proposalFilter === "ACTIVE"
+                    ? "No Active Commercial Proposals"
+                    : "No Proposal Selected"}
+                </p>
+                <p className="text-muted-foreground max-w-sm mx-auto text-[11px] leading-relaxed">
+                  {proposalFilter === "ACTIVE"
+                    ? "All your quotations have been confirmed, paid, and closed. You can track deliveries and invoices under Order History, or view past quotes using the All / History filter."
+                    : "Select a commercial proposal from the left list to review terms, counter-proposals, and messages."}
+                </p>
+              </div>
+              <div className="pt-2 flex justify-center gap-2">
+                <Button size="sm" onClick={() => setActiveTab("orders")}>
+                  <PackageCheck className="h-3.5 w-3.5 mr-1" /> View Order & Delivery History
+                </Button>
+                {proposalFilter === "ACTIVE" && myQuotations.length > 0 && (
+                  <Button size="sm" variant="outline" onClick={() => setProposalFilter("ALL")}>
+                    Show All Archived Proposals
+                  </Button>
+                )}
+              </div>
             </Card>
           )}
         </div>

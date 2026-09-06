@@ -582,6 +582,15 @@ export function AppShell({
                     icon={<FileText className="h-4 w-4" />}
                     label="My Quotations"
                     active={currentTab === "portal"}
+                    count={
+                      state.quotations.filter((q) => {
+                        if (q.customerId !== session?.customerId) return false;
+                        if (q.stage === "PAID" || q.stage === "CANCELLED") return false;
+                        const inv = state.invoices.find((i) => i.quotationId === q.id);
+                        if (inv && inv.status === "PAID") return false;
+                        return true;
+                      }).length
+                    }
                     onClick={() => {
                       onSelectTab("portal");
                       setMobileOpen(false);
@@ -593,7 +602,13 @@ export function AppShell({
                     active={currentTab === "portal"}
                     count={
                       state.quotations
-                        .filter((q) => q.customerId === session?.customerId)
+                        .filter((q) => {
+                          if (q.customerId !== session?.customerId) return false;
+                          if (q.stage === "PAID" || q.stage === "CANCELLED") return false;
+                          const inv = state.invoices.find((i) => i.quotationId === q.id);
+                          if (inv && inv.status === "PAID") return false;
+                          return true;
+                        })
                         .reduce((sum, q) => sum + q.requests.length, 0)
                     }
                     onClick={() => {
