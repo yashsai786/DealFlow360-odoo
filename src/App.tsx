@@ -19,6 +19,34 @@ import { ShieldAlert } from "lucide-react";
 import { useAppState, identityActions } from "./infrastructure/store";
 import { canAccessPage } from "./modules/identity/permissions";
 
+function getInitialNav(role?: string) {
+  const isCustomer = role === "CUSTOMER";
+  const defaultTab: NavTab = isCustomer ? "portal" : "dashboard";
+  if (typeof window === "undefined") {
+    return { tab: defaultTab, quoteId: undefined, approvalId: undefined };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const rawTab = (params.get("tab") as NavTab) || (sessionStorage.getItem("df360_active_tab") as NavTab);
+  const rawQuoteId = params.get("quoteId") || params.get("id") || sessionStorage.getItem("df360_quote_id");
+  const rawApprovalId = params.get("approvalId") || sessionStorage.getItem("df360_approval_id");
+
+  // STRICT RBAC CHECK: Validate tab against user's role permissions
+  let safeTab: NavTab = defaultTab;
+  if (rawTab && canAccessPage(role, rawTab)) {
+    safeTab = rawTab;
+  }
+
+  const shouldHaveQuoteId = safeTab === "quotation-builder" || safeTab === "portal";
+  const shouldHaveApprovalId = safeTab === "approvals";
+
+  return {
+    tab: safeTab,
+    quoteId: shouldHaveQuoteId ? (rawQuoteId || undefined) : undefined,
+    approvalId: shouldHaveApprovalId ? (rawApprovalId || undefined) : undefined,
+  };
+}
+
 export default function App() {
   const state = useAppState();
   const session = state.session;
@@ -29,32 +57,107 @@ export default function App() {
     identityActions.syncWithDatabase();
   }, []);
 
-  const [currentTab, setCurrentTab] = useState<NavTab>(
-    isCustomer ? "portal" : "dashboard",
-  );
+  const initialNav = getInitialNav(session?.role);
+  const [currentTab, setCurrentTab] = useState<NavTab>(initialNav.tab);
   const [selectedQuotationId, setSelectedQuotationId] = useState<string | undefined>(
-    "q-1041",
+    initialNav.quoteId,
   );
-  const [selectedApprovalId, setSelectedApprovalId] = useState<string | undefined>();
+  const [selectedApprovalId, setSelectedApprovalId] = useState<string | undefined>(
+    initialNav.approvalId,
+  );
 
-  // Auto-switch to authorized tab if user switches role
+  const syncUrlAndStorage = (tab: NavTab, quoteId?: string, approvalId?: string) => {
+    if (typeof window === "undefined") return;
+    try {
+      const params = new URLSearchParams();
+      params.set("tab", tab);
+
+      // Only attach quoteId if on quotation-builder or portal
+      const shouldHaveQuote = (tab === "quotation-builder" || tab === "portal") && Boolean(quoteId);
+      if (shouldHaveQuote && quoteId) {
+        params.set("quoteId", quoteId);
+      }
+
+      // Only attach approvalId if on approvals
+      const shouldHaveApproval = tab === "approvals" && Boolean(approvalId);
+      if (shouldHaveApproval && approvalId) {
+        params.set("approvalId", approvalId);
+      }
+
+      const newUrl = `${window.location.pathname}?${params.toString()}`;
+      window.history.replaceState(null, "", newUrl);
+
+      sessionStorage.setItem("df360_active_tab", tab);
+      if (shouldHaveQuote && quoteId) {
+        sessionStorage.setItem("df360_quote_id", quoteId);
+      } else {
+        sessionStorage.removeItem("df360_quote_id");
+      }
+      if (shouldHaveApproval && approvalId) {
+        sessionStorage.setItem("df360_approval_id", approvalId);
+      } else {
+        sessionStorage.removeItem("df360_approval_id");
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  // Enforce authorized tab whenever session role changes or mounts
   useEffect(() => {
     if (session) {
       if (!canAccessPage(session.role, currentTab)) {
-        setCurrentTab(isCustomer ? "portal" : "dashboard");
+        const fallback = isCustomer ? "portal" : "dashboard";
+        setCurrentTab(fallback);
+        syncUrlAndStorage(fallback, selectedQuotationId, selectedApprovalId);
+      } else {
+        syncUrlAndStorage(currentTab, selectedQuotationId, selectedApprovalId);
       }
     }
-  }, [session?.role, isCustomer, currentTab]);
+  }, [session?.role]);
+
+  // Handle browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = () => {
+      const nav = getInitialNav(session?.role);
+      setCurrentTab(nav.tab);
+      setSelectedQuotationId(nav.quoteId);
+      setSelectedApprovalId(nav.approvalId);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [session?.role]);
 
   const handleNavigate = (tab: NavTab, extraId?: string) => {
+    // STRICT RBAC CHECK: Prevent unauthorized tab navigation
+    if (!canAccessPage(session?.role, tab)) {
+      tab = isCustomer ? "portal" : "dashboard";
+    }
+
+    let nextQuoteId = selectedQuotationId;
+    let nextApprovalId = selectedApprovalId;
+
     if (extraId) {
       if (tab === "approvals") {
+        nextApprovalId = extraId;
         setSelectedApprovalId(extraId);
       } else {
+        nextQuoteId = extraId;
         setSelectedQuotationId(extraId);
+      }
+    } else {
+      if (tab !== "quotation-builder" && tab !== "portal") {
+        nextQuoteId = undefined;
+        setSelectedQuotationId(undefined);
+      }
+      if (tab !== "approvals") {
+        nextApprovalId = undefined;
+        setSelectedApprovalId(undefined);
       }
     }
     setCurrentTab(tab);
+    syncUrlAndStorage(tab, nextQuoteId, nextApprovalId);
+
     window.scrollTo({ top: 0, behavior: "smooth" });
     const mainEl = document.getElementById("main-content");
     if (mainEl) {
