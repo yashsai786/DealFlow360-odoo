@@ -10,7 +10,7 @@ import {
 } from "../../infrastructure/store";
 import { stageLabel, lineNet, lineMargin } from "../../modules/quotations/service";
 import { getRecommendations } from "../../modules/recommendations/service";
-import type { CustomerTier, ProductCategory } from "../../modules/shared/types";
+import type { CustomerTier, ProductCategory, Recommendation } from "../../modules/shared/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -88,6 +88,7 @@ export function QuotationBuilderView({
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [repChatInput, setRepChatInput] = useState("");
+  const [upsellCategoryFilter, setUpsellCategoryFilter] = useState<ProductCategory | "MATCH" | "ALL">("MATCH");
 
   useEffect(() => {
     if (quotationId !== activeQuoteId) {
@@ -203,7 +204,15 @@ export function QuotationBuilderView({
   // Active quotation data
   const totals = totalsOf(state, quotation);
   const evaluation = evaluate(state, quotation);
-  const recommendations = getRecommendations(quotation, products, state.governance?.upsellConfig);
+  const cartCategories = Array.from(
+    new Set(quotation.lines.map((l) => products[l.productId]?.category).filter(Boolean))
+  ) as ProductCategory[];
+  const recommendations = getRecommendations(
+    quotation,
+    products,
+    state.governance?.upsellConfig,
+    upsellCategoryFilter,
+  );
 
   const isOwner = !quotation.ownerId || quotation.ownerId === session?.id;
   const canEdit = session?.role === "ADMIN" || session?.role === "SALES_MANAGER" || (isSalesRep && isOwner);
@@ -267,6 +276,24 @@ export function QuotationBuilderView({
       setOrderDiscount("");
     } catch (err: any) {
       toast.error("Failed to apply order-level discount");
+    }
+  };
+
+  const handleAddRecommendation = async (rec: Recommendation) => {
+    try {
+      await quotationActions.addRecommendation(quotation.id, rec.productId);
+      toast.success(`Added ${rec.productName} to quote (+₹${rec.marginDelta.toLocaleString()} margin)`);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to add recommendation");
+    }
+  };
+
+  const handleDismissRecommendation = async (productId: string) => {
+    try {
+      await quotationActions.dismissRecommendation(quotation.id, productId);
+      toast.info("Recommendation dismissed");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to dismiss recommendation");
     }
   };
 
@@ -799,71 +826,194 @@ export function QuotationBuilderView({
             </CardContent>
           </Card>
 
-          {/* Upsell / Cross-sell Recommendations */}
-          {recommendations.length > 0 && (
-            <Card className="shadow-xs border-primary/20 bg-primary/5">
-              <CardHeader className="p-4 pb-2">
-                <CardTitle className="text-xs font-semibold flex items-center gap-1.5 text-primary">
-                  <Sparkles className="h-4 w-4" />
+          {/* Upsell / Cross-sell Recommendations Panel (B5 Special Flow) */}
+          <Card className="shadow-xs border-primary/30 bg-gradient-to-br from-primary/5 via-card to-background">
+            <CardHeader className="p-4 pb-2 border-b border-border/50 flex flex-row items-center justify-between gap-2 flex-wrap">
+              <div>
+                <CardTitle className="text-xs font-bold flex items-center gap-1.5 text-primary">
+                  <Sparkles className="h-4 w-4 text-primary animate-pulse" />
                   Intelligent Upsell & Cross-Sell Recommendations
+                  <Badge variant="secondary" className="text-[10px] ml-1 font-mono font-medium">
+                    Top 3 Related {cartCategories.length > 0 ? `(${cartCategories.join(", ")})` : ""}
+                  </Badge>
                 </CardTitle>
-                <CardDescription className="text-[11px]">
-                  Algorithms derived from co-purchase affinity graph and margin optimization
+                <CardDescription className="text-[11px] mt-0.5">
+                  Dynamic algorithmic companion pairings strictly matching category ({cartCategories.length > 0 ? cartCategories.join(", ") : "All"}), margin cutoff ({state.governance?.upsellConfig?.minMarginPct ?? 15}%), and active promotions.
                 </CardDescription>
-              </CardHeader>
-              <CardContent className="p-4 pt-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {recommendations.map((rec) => (
-                  <div
-                    key={rec.productId}
-                    className="p-3 rounded-lg border border-border bg-card text-card-foreground space-y-2 text-xs flex flex-col justify-between"
+              </div>
+              <div className="flex items-center gap-1.5">
+                {quotation.dismissedRecommendations.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => quotationActions.resetDismissedRecommendations(quotation.id)}
+                    className="h-6 text-[10px] text-muted-foreground hover:text-foreground"
                   >
-                    <div>
-                      <div className="flex items-center justify-between font-semibold">
-                        <div className="flex items-center gap-1.5">
-                          <span>{rec.productName}</span>
+                    Reset Dismissed ({quotation.dismissedRecommendations.length})
+                  </Button>
+                )}
+                <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-300 font-mono">
+                  Margin-Optimized
+                </Badge>
+              </div>
+            </CardHeader>
+
+            {/* Category Filter Chips Bar */}
+            <div className="px-4 py-2 bg-muted/40 border-b border-border/40 flex items-center justify-between gap-2 flex-wrap text-xs">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] font-medium text-muted-foreground">Category Mode:</span>
+                <div className="flex items-center gap-1 bg-background/90 p-0.5 rounded-lg border border-border">
+                  <button
+                    type="button"
+                    onClick={() => setUpsellCategoryFilter("MATCH")}
+                    className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
+                      upsellCategoryFilter === "MATCH"
+                        ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Matched ({cartCategories.length > 0 ? cartCategories.join(", ") : "All"})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUpsellCategoryFilter("ALL")}
+                    className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
+                      upsellCategoryFilter === "ALL"
+                        ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    All Categories
+                  </button>
+                  {(["Services", "Hardware", "Subscriptions"] as const).map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setUpsellCategoryFilter(cat)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
+                        upsellCategoryFilter === cat
+                          ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {cartCategories.length > 0 && (
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium font-mono">
+                  ✓ Category-locked to cart ({cartCategories.join(", ")})
+                </span>
+              )}
+            </div>
+
+            <CardContent className="p-4 pt-3">
+              {recommendations.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {recommendations.map((rec) => {
+                    const productObj = products[rec.productId];
+                    return (
+                      <div
+                        key={rec.productId}
+                        className="p-3 rounded-xl border border-border/80 bg-card text-card-foreground shadow-xs hover:shadow-md transition-all space-y-2.5 flex flex-col justify-between group"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-start justify-between gap-1.5">
+                            <div className="space-y-0.5 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-semibold text-xs text-foreground group-hover:text-primary transition-colors">
+                                  {rec.productName}
+                                </span>
+                              </div>
+                              {productObj?.category && (
+                                <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+                                  {productObj.category}
+                                </Badge>
+                              )}
+                            </div>
+                            <span className="font-mono font-bold text-xs text-primary shrink-0">
+                              ₹{rec.price.toLocaleString()}
+                            </span>
+                          </div>
+
                           {rec.isPromoted && (
-                            <Badge className="bg-amber-500 hover:bg-amber-500 text-white text-[9px] px-1.5 py-0 uppercase tracking-wider font-bold">
-                              Promoted
-                            </Badge>
+                            <div className="flex items-center gap-1">
+                              <Badge className="bg-amber-500 hover:bg-amber-500 text-white text-[9px] px-1.5 py-0 uppercase tracking-wider font-bold flex items-center gap-0.5">
+                                <Sparkles className="h-2.5 w-2.5" />
+                                Promoted
+                              </Badge>
+                              {rec.promotion && (
+                                <span className="text-[10px] text-amber-700 dark:text-amber-400 font-medium truncate">
+                                  {rec.promotion}
+                                </span>
+                              )}
+                            </div>
                           )}
+
+                          <p className="text-[11px] text-muted-foreground leading-snug line-clamp-2">
+                            {rec.reason}
+                          </p>
                         </div>
-                        <span className="font-mono text-primary">₹{rec.price}</span>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground mt-1">{rec.reason}</p>
-                      {rec.promotion && (
-                        <div className="mt-1.5 text-[10px] font-medium text-amber-600 bg-amber-50 dark:bg-amber-950/40 p-1 rounded">
-                          {rec.promotion}
+
+                        <div className="pt-2 border-t border-border/60 flex items-center justify-between gap-2">
+                          <div className="flex flex-col">
+                            <span className="text-[10px] text-muted-foreground">Impact:</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono text-[11px]">
+                              +₹{rec.marginDelta.toLocaleString()} margin
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={!canEdit}
+                              onClick={() => handleDismissRecommendation(rec.productId)}
+                              className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                            >
+                              Dismiss
+                            </Button>
+                            <Button
+                              size="sm"
+                              disabled={!canEdit}
+                              onClick={() => handleAddRecommendation(rec)}
+                              className="h-7 px-2.5 text-[10px] bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs font-semibold flex items-center gap-1 cursor-pointer"
+                            >
+                              <PackagePlus className="h-3 w-3" />
+                              Add to Quote
+                            </Button>
+                          </div>
                         </div>
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between pt-2 border-t border-border/50 text-[11px]">
-                      <span className="text-emerald-600 font-medium">
-                        +₹{rec.marginDelta.toLocaleString()} margin
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => quotationActions.dismissRecommendation(quotation.id, rec.productId)}
-                          className="h-6 text-[10px] text-muted-foreground"
-                        >
-                          Dismiss
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => quotationActions.addRecommendation(quotation.id, rec.productId)}
-                          className="h-6 text-[10px]"
-                        >
-                          <PackagePlus className="h-3 w-3 mr-1" />
-                          Add to Quote
-                        </Button>
                       </div>
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-6 text-center text-xs text-muted-foreground space-y-1.5">
+                  <Sparkles className="h-6 w-6 mx-auto text-primary/40 mb-1" />
+                  <p className="font-semibold text-foreground">
+                    {quotation.lines.length === 0
+                      ? "Add catalog products above to generate related cross-sell suggestions"
+                      : "All recommendations for current items have been added or dismissed"}
+                  </p>
+                  <p className="text-[11px] max-w-md mx-auto text-muted-foreground">
+                    The recommendation engine analyzes co-purchase affinity, admin-promoted flags, and ensures suggestions meet the {state.governance?.upsellConfig?.minMarginPct ?? 15}% profit margin cutoff.
+                  </p>
+                  {quotation.dismissedRecommendations.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => quotationActions.resetDismissedRecommendations(quotation.id)}
+                      className="h-7 text-xs mt-2"
+                    >
+                      Restore Dismissed Recommendations
+                    </Button>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         {/* Right Col: Commercial Totals & Blended Risk Governance */}

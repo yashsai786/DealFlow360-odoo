@@ -280,6 +280,7 @@ export interface Recommendation {
   promotion?: string | undefined;
   price: number;
   isPromoted?: boolean | undefined;
+  category?: string | undefined;
 }
 
 export type DealHealthStatus = "Healthy" | "Watch" | "At Risk" | "Critical";

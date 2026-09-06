@@ -703,12 +703,12 @@ export const quotationActions = {
     }
   },
 
-  addRecommendation(quotationId: string, productId: string) {
+  async addRecommendation(quotationId: string, productId: string) {
     const quotation = state.quotations.find((q) => q.id === quotationId);
     const product = state.products.find((p) => p.id === productId);
     if (!quotation || !product) return;
     const qty = quotation.lines[0]?.qty ?? 1;
-    quotationActions.addLine(quotationId, productId, qty);
+    await quotationActions.addLine(quotationId, productId, qty);
     emit("RecommendationAdded", `${quotation.number} · ${product.name}`);
     notify();
   },
@@ -726,6 +726,16 @@ export const quotationActions = {
     } catch (err) {
       console.error("[Recommendations] Failed to persist dismissal:", err);
     }
+    notify();
+  },
+
+  async resetDismissedRecommendations(quotationId: string) {
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    if (!quotation) return;
+    replaceQuotation({
+      ...quotation,
+      dismissedRecommendations: [],
+    });
     notify();
   },
 
