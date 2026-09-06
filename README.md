@@ -1,392 +1,131 @@
-# DealFlow360
+# DealFlow360 🚀
+### *An Intelligent, Self-Governing B2B Sales Operations Platform*
 
-> **An Intelligent, Self-Governing Sales Operations Platform**
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-18+-61dafb.svg)](https://reactjs.org/)
+[![Vite](https://img.shields.io/badge/Vite-6.0+-646cff.svg)](https://vitejs.dev/)
+[![Prisma](https://img.shields.io/badge/Prisma-ORM-2D3748.svg)](https://www.prisma.io/)
+[![SQLite](https://img.shields.io/badge/SQLite-Embedded-003B57.svg)](https://www.sqlite.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-CSS-38bdf8.svg)](https://tailwindcss.com/)
 
-DealFlow360 is a B2B sales operations platform designed to connect the
-complete sales lifecycle into one intelligent workflow:
+---
 
-**Quotation → Discount Governance → Approval → Upsell/Cross-sell →
-Fulfillment → Subscription/Billing → Customer Negotiation → Re-approval
-→ Invoice → Payment → Deal Health → Reporting**
+## 📌 What is DealFlow360?
 
-The project is being developed as a hackathon implementation with a
-strong focus on real business rules, Domain-Driven Design (DDD), bounded
-contexts, and a microservice-oriented architecture.
+Most sales platforms act as dumb data entry forms: you draft a quote, manually email managers for discount approval, phone the warehouse to see if stock exists, and juggle separate billing systems for subscriptions vs hardware.
 
-## Project Vision
+**DealFlow360** eliminates this sales chaos by connecting the entire B2B sales lifecycle into a **single, self-governing, reactive workflow**:
 
-Traditional sales systems often treat quotations, approvals, inventory,
-billing, and customer communication as disconnected modules.
-
-DealFlow360 connects them.
-
-A change in one part of a deal can automatically affect the rest of the
-lifecycle. For example:
-
--   A discount change can recalculate risk and approval requirements.
--   A customer negotiation can trigger re-approval.
--   An inventory shortage can create a backorder and affect deal health.
--   A payment can reconcile an invoice and advance the quotation
-    lifecycle.
--   Adding an upsell can update quotation totals, margin, and
-    governance.
-
-The goal is to demonstrate a realistic, self-governing B2B sales
-workflow rather than a collection of disconnected CRUD screens.
-
-## Core Capabilities
-
-### Quotation & Sales
-
--   Customer-aware quotation creation
--   Product and quantity management
--   One-time and recurring quotation lines
--   Live totals, taxes, discounts, and margin
--   Quotation lifecycle/state transitions
-
-### Discount Governance
-
--   Customer-tier discount ceilings
--   Category-specific discount ceilings
--   Line-level discount evaluation
--   Quote-level blended risk scoring
--   Automatic approval-chain determination
--   Audit trail for important decisions
-
-Default customer tiers:
-
-  Tier       Discount Ceiling
-  -------- ------------------
-  Bronze                   5%
-  Silver                  10%
-  Gold                    15%
-
-Default category ceilings:
-
-  Category     Discount Ceiling
-  ---------- ------------------
-  Hardware                  15%
-  Services                  10%
-
-### Approval Workflow
-
--   Automatic approval routing
--   Sales Manager approval
--   Finance approval for high-risk quotes
--   Approve / Return for Revision / Reject
--   Approval history and audit trail
-
-### Upsell & Cross-sell
-
--   Seeded co-purchase relationships
--   Margin-aware recommendations
--   Promotion-aware recommendations
--   Recommendation ranking
--   Add-to-quote and dismiss actions
-
-### Multi-Warehouse Fulfillment
-
--   Live stock evaluation
--   Warehouse allocation
--   Shipping-cost-aware split calculation
--   Manual allocation override
--   Shortage detection
--   Backorder creation
--   Backorder consolidation after replenishment
-
-### Subscription & Hybrid Billing
-
--   One-time products + recurring products in the same quotation
--   Monthly, quarterly, and yearly billing
--   Billing schedules
--   Subscription modification
--   Pause/resume/cancel
--   Mid-cycle proration
--   Billing adjustments
-
-### Customer Negotiation
-
--   Restricted customer portal
--   Line-level negotiation
--   Counter-discount requests
--   Delivery-date requests
--   Customer/sales messaging
--   Automatic governance re-evaluation
--   Re-approval when negotiated terms exceed policy
-
-### Invoices & Payments
-
--   Invoice lifecycle
--   Partial payments
--   Outstanding balance calculation
--   Payment reconciliation
--   Paid / partially paid states
-
-### Deal Intelligence
-
--   Stalled-deal detection
--   Discount anomalies
--   Delivery slippage
--   Approval bottlenecks
--   Negotiation pressure
--   Deal health classification
--   Nudge and escalation actions
-
-### Reporting
-
--   Revenue and pipeline metrics
--   Quote metrics
--   Conversion metrics
--   Approval duration
--   Discount trends
--   Rep performance
--   Top upsold products
--   Approval bottleneck analysis
--   CSV/Excel export
--   Printable/PDF reporting
-
-## Architecture
-
-DealFlow360 follows **Domain-Driven Design (DDD)** and is organized
-around business bounded contexts.
-
-### Bounded Contexts
-
-1.  Identity & Access
-2.  Catalog & Pricing
-3.  Discount Governance
-4.  Quotation / Sales
-5.  Recommendation
-6.  Fulfillment & Inventory
-7.  Subscription & Billing
-8.  Deal Intelligence
-9.  Reporting
-10. Customer Portal / Negotiation
-
-The architecture is intentionally microservice-oriented: each bounded
-context owns its business logic and communicates through clear
-service/application contracts and meaningful domain events.
-
-For the hackathon, the focus is on clean service boundaries without
-unnecessary operational infrastructure such as Kubernetes, service
-meshes, or distributed messaging platforms.
-
-### Architectural Direction
-
-``` text
-                ┌──────────────────────┐
-                │      Next.js UI      │
-                │  App Router / React  │
-                └──────────┬───────────┘
-                           │
-                           ▼
-                ┌──────────────────────┐
-                │  Application Layer   │
-                │  Service Contracts   │
-                └──────────┬───────────┘
-                           │
-          ┌────────────────┼────────────────┐
-          ▼                ▼                ▼
-     Quotations      Discount          Fulfillment
-      Domain        Governance           Domain
-          │                │                │
-          ├──── Recommendation ─────────────┤
-          │                                 │
-          ├──── Billing / Subscription ─────┤
-          │                                 │
-          └──── Deal Intelligence ──────────┘
-                           │
-                           ▼
-                ┌──────────────────────┐
-                │    Infrastructure    │
-                │   Prisma + SQLite    │
-                └──────────────────────┘
+```
+[ Quote Creation ] ──► [ AI Upsell Engine ] ──► [ Discount Governance & Risk ]
+        ▲                                                      │
+        │ Re-approval                                          ▼
+[ Customer Negotiation ] ◄────────────────────────── [ Multi-tier Approval ]
+        │
+        ▼
+[ Multi-Warehouse Fulfillment ] ──► [ Hybrid Billing & Invoicing ] ──► [ Deal Health & AI Alerts ]
 ```
 
-Business logic must remain outside React components.
+When something changes in one stage of a deal (e.g. a customer requests a 20% discount in the portal, or a warehouse runs out of stock), the platform **automatically recalculates risk, routes approvals, splits fulfillment orders, and alerts stakeholders** in real time.
 
-The intended dependency direction is:
+---
 
-``` text
-UI
- ↓
-Application Services
- ↓
-Domain
- ↓
-Repository Interfaces
- ↓
-Infrastructure
- ↓
-SQLite
+## ⚡ Quick Start & How to Access
+
+### 1. Prerequisites
+* **Node.js** 18+ installed
+* **npm** 9+ installed
+
+### 2. Installation & Database Setup
+```bash
+# Clone the repository
+git clone https://github.com/yashsai786/DealFlow360-odoo.git
+cd DealFlow360-odoo
+
+# Install dependencies
+npm install
+
+# Seed the enterprise database (300+ quotations, 215 products, 52 users, 5 warehouses)
+npx tsx prisma/seed.ts
+
+# Start the development server
+npm run dev
 ```
 
-## Technology
+### 3. Accessing the Application
+Open your browser and navigate to:
+👉 **`http://localhost:5173`**
 
-The target technology stack is:
+---
 
--   **Next.js**
--   **Next.js App Router**
--   **React**
--   **TypeScript**
--   **Tailwind CSS**
--   **shadcn/ui**
--   **Lucide Icons**
--   **Prisma**
--   **SQLite**
+## 👥 Demo Personas (1-Click Instant Sign-In)
 
-SQLite is the required persistent database for the project.
+The login screen includes **1-click quick login buttons** for every key enterprise role. You can also log in manually with password `DealFlow@2026`:
 
-The existing project was initially generated with Lovable and contains
-reusable React/Tailwind/shadcn UI work and domain services. Migration
-and integration are being handled incrementally rather than rebuilding
-the product from scratch.
+| Persona | Role | Email | Best For Testing |
+| :--- | :--- | :--- | :--- |
+| **Sasha Idris** | **Admin** | `admin@dealflow360.io` | Setting governance rules, discount ceilings & audit logs |
+| **Dana Whitfield** | **Sales Manager** | `manager@dealflow360.io` | Reviewing discount escalations, approving/rejecting deals |
+| **Owen Vasquez** | **Finance & Ops** | `finance@dealflow360.io` | High-risk deal sign-off, margin audits & payment ledger |
+| **Priya Raman** | **Sales Rep** | `rep@dealflow360.io` | Creating quotes, live AI recommendations, deal intelligence |
+| **Lena Ortiz** | **Customer Portal** | `acme@customer.io` | Negotiating live quotes, requesting concessions, accepting orders |
 
-## Current Development State
+> 💡 **Self-Service Customer Onboarding**: In the **Sign Up** tab, selecting **Customer** gives you the choice to either join an existing enterprise account or click **`+ New Company`** to register a brand-new organization on the fly!
 
-This repository is an active work-in-progress.
+---
 
-The current implementation already contains substantial domain
-foundations, including:
+## 💡 Key Problems & Unique Solutions
 
--   Identity and role permissions
--   Discount governance and blended risk
--   Quotation calculations
--   Recommendation engine
--   Fulfillment and warehouse allocation
--   Billing and proration
--   Deal intelligence
--   Reporting calculations
--   Seed/demo data
--   Reactive application state
--   Domain events
--   Audit trail
+| The Real-World Sales Problem | How DealFlow360 Uniquely Solves It |
+| :--- | :--- |
+| **Rogue Discounting & Margin Erosion**<br>Reps give unapproved discounts to close deals, hurting profitability. | **Self-Governing Discount Governance Engine**<br>Evaluates customer tiers (Gold 15%, Silver 10%, Bronze 5%) and category margins in real-time. Automatically scores deal risk and locks quotes into hierarchical approval chains (Sales Manager $\rightarrow$ Finance) before issuance. |
+| **Fragmented Multi-Warehouse Stock**<br>Orders get stuck because products are scattered across regional hubs. | **Intelligent Multi-Warehouse Fulfillment Splitting**<br>Simulates live inventory across 5 hubs (Mumbai, Kolkata, Delhi, Bengaluru, Ahmedabad), calculates freight costs, automatically splits shipment allocations, and generates backorders for replenishment. |
+| **Complex Hybrid Billing**<br>Mixing one-time hardware with recurring subscriptions breaks traditional invoicing. | **Unified Hybrid Billing with Mid-Cycle Proration**<br>Quotes combine one-time capital purchases and monthly/quarterly subscriptions on one screen. Handles automated billing calendars, proration refunds, and payment reconciliation. |
+| **Disconnected Customer Negotiations**<br>Price haggling happens over messy email chains with no accountability. | **External Customer Negotiation Portal**<br>Customers review live interactive quotes, propose line-item counter-discounts or requested dates, and chat directly with reps. If a concession violates policy, the platform auto-triggers re-approval. |
+| **Silent Deal Deaths (Stalled Pipeline)**<br>Deals sit idle for weeks without anyone noticing. | **Proactive Deal Health & Anomaly Detector**<br>Monitors deal velocity, discount anomalies, delivery slippage, and stalled negotiation cycles. Gives reps 1-click **Nudge** and **Escalate** actions. |
+| **Rigid Pre-seeded Mock Constraints**<br>Demo platforms only allow logging into pre-baked customer accounts. | **On-the-Fly Corporate Registration**<br>Prospective customers can either select an existing account (to test quotes with historical data) or provision a new corporate entity with industry and tier on the fly. |
 
-The remaining work focuses on completing the application shell and
-screens, connecting the existing domain logic to the UI, implementing
-SQLite/Prisma persistence, completing admin configuration, customer
-isolation, tests, and end-to-end verification.
+---
 
-## Demo Personas
+## 🏗️ Architecture & Tech Stack
 
-The application uses demo personas to demonstrate role-specific
-workflows:
+DealFlow360 is built using **Domain-Driven Design (DDD)** with clean separation between the presentation layer, application services, domain business rules, and persistent storage:
 
--   **Priya Raman** --- Sales Representative
--   **Dana Whitfield** --- Sales Manager
--   **Owen Vasquez** --- Finance & Operations
--   **Sasha Idris** --- Administrator
--   **Lena Ortiz** --- Acme Corp Customer
--   **Ravi Kapoor** --- Beta Industries Customer
-
-## Demo Scenario
-
-A key demonstration scenario uses:
-
-**Acme Corp --- Gold Customer**
-
-Quotation:
-
--   Enterprise Laptop --- 12% discount
--   Setup Service --- 18% discount
-
-The Laptop discount is within the Hardware ceiling.
-
-The Setup Service discount exceeds the Services ceiling.
-
-The quotation therefore demonstrates the blended discount-risk and
-approval workflow.
-
-The intended flow is:
-
-``` text
-Sales Rep
-   ↓
-Create Quotation
-   ↓
-Discount Governance
-   ↓
-Blended Risk
-   ↓
-Approval
-   ↓
-Upsell / Cross-sell
-   ↓
-Fulfillment
-   ↓
-Hybrid Billing
-   ↓
-Customer Negotiation
-   ↓
-Re-approval (if required)
-   ↓
-Invoice
-   ↓
-Payment
-   ↓
-Deal Health
-   ↓
-Reporting
+```
+[ Frontend: React 18 + Tailwind CSS + Radix UI / shadcn ]
+                       │ (REST / API Bridge)
+[ Application Layer: Next.js API Routes & Service Contracts ]
+                       │
+[ Domain Services: Governance, Recommendations, Fulfillment, Billing, Intelligence ]
+                       │
+[ Infrastructure Layer: Prisma ORM + SQLite Persistent Engine ]
 ```
 
-## Engineering Principles
+* **Frontend**: React 18, TypeScript, Tailwind CSS, Radix UI (shadcn/ui), Lucide Icons
+* **Backend**: Next.js App Router API routes bridged seamlessly into Vite dev server
+* **Persistence**: Prisma ORM with SQLite database (`prisma/dev.db`)
+* **State Management**: Reactive in-memory store with LocalStorage hydration and database synchronization
+* **Enterprise Dataset**: 52 Users, 30 Customers, 215 Products, 5 Warehouses, 390 Inventory Items, 300 Quotations (250 completed history + 50 active pipeline), 275 Approvals, 250 Fulfillment Orders, and 125 Invoices.
 
-### 1. Real Business Logic
+---
 
-Core business rules must be implemented in application/domain services,
-not simulated in the UI.
+## 🧪 5-Minute Demo Flow to Showcase
 
-### 2. Single Source of Truth
+1. **Sign in as Sales Rep** (`rep@dealflow360.io`):
+   * Open **Quotation Builder**, select **Acme Corp** (Gold Tier, max 15% discount).
+   * Add **Setup Service** at an **18% discount** (exceeds service ceiling).
+   * Notice the **AI Recommendation banner** suggest a complementary Care Pack.
+   * Click **Submit for Approval** $\rightarrow$ System scores deal as **High Risk** and locks it into multi-tier approval.
+2. **Switch to Sales Manager** (`manager@dealflow360.io`):
+   * Go to **Approvals Queue** $\rightarrow$ Review quote risk breakdown and click **Approve**.
+3. **Switch to Customer Portal** (`acme@customer.io`):
+   * View the newly approved quote in the Customer Portal.
+   * Request a concession or revision in the negotiation drawer.
+4. **Inspect Fulfillment & Hybrid Billing**:
+   * Confirm the deal $\rightarrow$ View automated **warehouse split allocation** across regional depots.
+   * View the generated **hybrid invoice** with both one-time hardware lines and recurring subscription schedules.
 
-Avoid conflicting copies of important business state.
+---
 
-### 3. DDD First
-
-Business boundaries should determine module boundaries.
-
-### 4. Service-Oriented Design
-
-Bounded contexts should communicate through clear contracts rather than
-directly reaching into each other's internals.
-
-### 5. No Dead Code
-
-Do not leave unused components, hooks, services, duplicate types, dead
-routes, fake buttons, placeholder business logic, or unnecessary
-dependencies.
-
-### 6. Preserve Existing Work
-
-Existing approved UI and working domain logic should be reused and
-extended rather than unnecessarily rewritten.
-
-### 7. Demo Reliability
-
-Every critical workflow must work end-to-end and produce consistent
-state changes.
-
-## Planned Validation
-
-The completed application should verify these six primary flows:
-
-1.  **Quotation → Approval**
-2.  **Recommendation → Fulfillment**
-3.  **Hybrid Billing**
-4.  **Customer Negotiation → Re-approval**
-5.  **Partial Payment → Full Payment**
-6.  **Deal Health → Nudge / Escalation**
-
-Core domain tests should cover discount governance, approval routing,
-warehouse allocation, backorders, billing/proration, payment
-reconciliation, negotiation/re-approval, and deal intelligence.
-
-## Status
-
-**Development Status: In Progress**
-
-DealFlow360 is being actively implemented and integrated as a hackathon
-project.
-
-The first priority is a reliable end-to-end demonstration of the
-complete sales lifecycle while maintaining clean DDD boundaries and a
-production-style architecture.
+## 📄 License
+Developed for the **DealFlow360 Hackathon**. All rights reserved.
