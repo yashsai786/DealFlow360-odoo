@@ -26,10 +26,12 @@ import {
   CheckCircle2,
   Users,
   AlertCircle,
+  Building2,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAppState, identityActions } from "../../infrastructure/store";
-import type { Role, User } from "../../modules/shared/types";
+import type { Role, User, CustomerTier } from "../../modules/shared/types";
 import { ROLE_LABELS } from "../../modules/identity/service";
 
 interface AuthViewProps {
@@ -54,6 +56,10 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
   const [signupCustomerId, setSignupCustomerId] = useState<string>(
     state.customers[0]?.id ?? "c-acme"
   );
+  const [customerMode, setCustomerMode] = useState<"EXISTING" | "NEW">("EXISTING");
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const [newCompanyIndustry, setNewCompanyIndustry] = useState("Technology");
+  const [newCompanyTier, setNewCompanyTier] = useState<CustomerTier>("Bronze");
   const [signupLoading, setSignupLoading] = useState(false);
 
   // Check if entered email/id is already registered
@@ -135,18 +141,32 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
       return;
     }
 
+    if (signupRole === "CUSTOMER" && customerMode === "NEW" && !newCompanyName.trim()) {
+      toast.error("Please enter your company or organization name");
+      return;
+    }
+
     setSignupLoading(true);
     try {
       const newUser = await identityActions.signup(
         signupName,
         signupEmail,
         signupRole,
-        signupRole === "CUSTOMER" ? signupCustomerId : undefined,
-        signupPassword
+        signupRole === "CUSTOMER" && customerMode === "EXISTING" ? signupCustomerId : undefined,
+        signupPassword,
+        signupRole === "CUSTOMER" && customerMode === "NEW"
+          ? {
+              name: newCompanyName.trim(),
+              industry: newCompanyIndustry,
+              tier: newCompanyTier,
+            }
+          : undefined
       );
       setSignupLoading(false);
       toast.success("Account created & secured!", {
-        description: `Welcome to DealFlow360, ${newUser.name}. Credentials safely encrypted.`,
+        description: `Welcome to DealFlow360, ${newUser.name}.${
+          customerMode === "NEW" ? ` Registered company "${newCompanyName.trim()}".` : ""
+        } Credentials safely encrypted.`,
       });
       onSuccess?.(newUser);
     } catch (err: any) {
@@ -379,25 +399,120 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
                     </div>
 
                     {signupRole === "CUSTOMER" && (
-                      <div className="space-y-1.5">
-                        <Label htmlFor="signup-customer" className="text-xs">
-                          Company Account
-                        </Label>
-                        <Select
-                          value={signupCustomerId}
-                          onValueChange={(val) => setSignupCustomerId(val)}
-                        >
-                          <SelectTrigger id="signup-customer" className="text-xs h-9">
-                            <SelectValue placeholder="Select Company" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {state.customers.map((c) => (
-                              <SelectItem key={c.id} value={c.id} className="text-xs">
-                                {c.name} ({c.tier})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                      <div className="space-y-2 rounded-lg border border-border/80 bg-muted/30 p-2.5">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+                            <Building2 className="h-3.5 w-3.5 text-primary" />
+                            Company Account
+                          </Label>
+                          <div className="flex items-center bg-muted rounded-md p-0.5 text-[11px] border border-border/60">
+                            <button
+                              type="button"
+                              onClick={() => setCustomerMode("EXISTING")}
+                              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all ${
+                                customerMode === "EXISTING"
+                                  ? "bg-background text-foreground shadow-xs font-semibold"
+                                  : "text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              Select Existing
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCustomerMode("NEW")}
+                              className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all flex items-center gap-1 ${
+                                customerMode === "NEW"
+                                  ? "bg-background text-primary shadow-xs font-semibold"
+                                  : "text-muted-foreground hover:text-foreground"
+                              }`}
+                            >
+                              <Sparkles className="h-2.5 w-2.5" />
+                              + New Company
+                            </button>
+                          </div>
+                        </div>
+
+                        {customerMode === "EXISTING" ? (
+                          <div className="space-y-1.5">
+                            <Select
+                              value={signupCustomerId}
+                              onValueChange={(val) => setSignupCustomerId(val)}
+                            >
+                              <SelectTrigger id="signup-customer" className="text-xs h-9 bg-background">
+                                <SelectValue placeholder="Select Company" />
+                              </SelectTrigger>
+                              <SelectContent className="max-h-56">
+                                {state.customers.map((c) => (
+                                  <SelectItem key={c.id} value={c.id} className="text-xs">
+                                    {c.name} ({c.tier})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <p className="text-[10.5px] text-muted-foreground leading-tight">
+                              Join an established enterprise account to immediately view shared quotations, contracts, and invoices.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2 pt-1">
+                            <div className="space-y-1">
+                              <Label htmlFor="new-company-name" className="text-[11px] text-muted-foreground font-medium">
+                                Company / Organization Name <span className="text-destructive">*</span>
+                              </Label>
+                              <Input
+                                id="new-company-name"
+                                placeholder="e.g. Stark Global Dynamics"
+                                value={newCompanyName}
+                                onChange={(e) => setNewCompanyName(e.target.value)}
+                                className="text-xs h-8.5 bg-background"
+                                required={customerMode === "NEW"}
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-muted-foreground font-medium">Industry</Label>
+                                <Select
+                                  value={newCompanyIndustry}
+                                  onValueChange={(val) => setNewCompanyIndustry(val)}
+                                >
+                                  <SelectTrigger className="text-xs h-8 bg-background">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="Technology" className="text-xs">Technology</SelectItem>
+                                    <SelectItem value="Manufacturing" className="text-xs">Manufacturing</SelectItem>
+                                    <SelectItem value="Healthcare" className="text-xs">Healthcare</SelectItem>
+                                    <SelectItem value="Financial Services" className="text-xs">Financial Services</SelectItem>
+                                    <SelectItem value="Retail & Logistics" className="text-xs">Retail & Logistics</SelectItem>
+                                    <SelectItem value="Energy & Utilities" className="text-xs">Energy & Utilities</SelectItem>
+                                    <SelectItem value="Consulting" className="text-xs">Consulting</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-muted-foreground font-medium">Default Tier</Label>
+                                <Select
+                                  value={newCompanyTier}
+                                  onValueChange={(val) => setNewCompanyTier(val as CustomerTier)}
+                                >
+                                  <SelectTrigger className="text-xs h-8 bg-background">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="Bronze" className="text-xs">Bronze (Standard 5%)</SelectItem>
+                                    <SelectItem value="Silver" className="text-xs">Silver (Preferred 10%)</SelectItem>
+                                    <SelectItem value="Gold" className="text-xs">Gold (Enterprise 15%)</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <p className="text-[10.5px] text-muted-foreground leading-tight">
+                              Creates a new client account entity and sets you as its primary procurement officer.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     )}
 
