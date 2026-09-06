@@ -173,7 +173,18 @@ export default function App() {
     }
   };
 
-  const isAuthorized = canAccessPage(session?.role, currentTab);
+  // Automatically enforce the effective authorized tab without showing restricted barrier
+  const safeTab: NavTab = canAccessPage(session?.role, currentTab)
+    ? currentTab
+    : (isCustomer ? "portal" : "dashboard");
+
+  // Keep state, URL, and storage in sync whenever safeTab differs from currentTab
+  useEffect(() => {
+    if (session && currentTab !== safeTab) {
+      setCurrentTab(safeTab);
+      syncUrlAndStorage(safeTab, selectedQuotationId, selectedApprovalId);
+    }
+  }, [session, currentTab, safeTab, selectedQuotationId, selectedApprovalId]);
 
   return (
     <>
@@ -181,105 +192,81 @@ export default function App() {
         <div className="min-h-screen bg-background text-foreground flex flex-col justify-center">
           <AuthView
             onSuccess={(user) => {
-              if (user.role === "CUSTOMER") {
-                handleNavigate("portal");
-              } else {
-                handleNavigate("dashboard");
-              }
+              const target = user.role === "CUSTOMER" ? "portal" : "dashboard";
+              handleNavigate(target);
             }}
           />
         </div>
       ) : (
         <AppShell
-          currentTab={currentTab}
+          currentTab={safeTab}
           onSelectTab={handleNavigate}
           selectedQuotationId={selectedQuotationId}
         >
-          {!isAuthorized ? (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8">
-              <div className="p-4 rounded-full bg-destructive/10 text-destructive mb-4">
-                <ShieldAlert className="h-10 w-10" />
-              </div>
-              <h2 className="text-xl font-bold tracking-tight text-foreground">Access Restricted</h2>
-              <p className="text-sm text-muted-foreground mt-2 max-w-md">
-                Your role ({session?.role}) is not authorized to access this module.
-              </p>
-              <Button
-                variant="outline"
-                className="mt-6"
-                onClick={() => handleNavigate(isCustomer ? "portal" : "dashboard")}
-              >
-                Return to {isCustomer ? "Portal" : "Dashboard"}
-              </Button>
-            </div>
-          ) : (
-            <>
-              {currentTab === "dashboard" && <DashboardView onNavigate={handleNavigate} />}
+          {safeTab === "dashboard" && <DashboardView onNavigate={handleNavigate} />}
 
-              {currentTab === "quotations" && (
-                <QuotationsListView
-                  initialView="list"
-                  onSelectQuote={(id) => handleNavigate("quotation-builder", id)}
-                  onCreateNew={() => {
-                    setSelectedQuotationId(undefined);
-                    handleNavigate("quotation-builder");
-                  }}
-                />
-              )}
-
-              {currentTab === "pipeline" && (
-                <QuotationsListView
-                  initialView="pipeline"
-                  onSelectQuote={(id) => handleNavigate("quotation-builder", id)}
-                  onCreateNew={() => {
-                    setSelectedQuotationId(undefined);
-                    handleNavigate("quotation-builder");
-                  }}
-                />
-              )}
-
-              {currentTab === "quotation-builder" && (
-                <QuotationBuilderView
-                  quotationId={selectedQuotationId}
-                  onBack={() => handleNavigate("quotations")}
-                  onNavigateToApproval={() => handleNavigate("approvals")}
-                />
-              )}
-
-              {currentTab === "approvals" && (
-                <ApprovalsView
-                  onOpenQuote={(quoteId) => handleNavigate("quotation-builder", quoteId)}
-                  initialApprovalId={selectedApprovalId}
-                />
-              )}
-
-              {currentTab === "fulfillment" && <FulfillmentView />}
-
-              {currentTab === "subscriptions" && <SubscriptionsView />}
-
-              {currentTab === "invoices" && <InvoicesView />}
-
-              {currentTab === "deal-health" && (
-                <DealHealthView
-                  onOpenQuote={(quoteId) => handleNavigate("quotation-builder", quoteId)}
-                />
-              )}
-
-              {currentTab === "reports" && <ReportingView />}
-
-              {currentTab === "governance" && <AdminConfigView initialTab="governance" />}
-
-              {currentTab === "warehouses" && <AdminConfigView initialTab="warehouses" />}
-
-              {currentTab === "admin" && <AdminConfigView />}
-
-              {currentTab === "portal" && (
-                <CustomerPortalView initialQuoteId={selectedQuotationId} />
-              )}
-
-              {currentTab === "profile" && <ProfileView onNavigate={handleNavigate} />}
-            </>
+          {safeTab === "quotations" && (
+            <QuotationsListView
+              initialView="list"
+              onSelectQuote={(id) => handleNavigate("quotation-builder", id)}
+              onCreateNew={() => {
+                setSelectedQuotationId(undefined);
+                handleNavigate("quotation-builder");
+              }}
+            />
           )}
+
+          {safeTab === "pipeline" && (
+            <QuotationsListView
+              initialView="pipeline"
+              onSelectQuote={(id) => handleNavigate("quotation-builder", id)}
+              onCreateNew={() => {
+                setSelectedQuotationId(undefined);
+                handleNavigate("quotation-builder");
+              }}
+            />
+          )}
+
+          {safeTab === "quotation-builder" && (
+            <QuotationBuilderView
+              quotationId={selectedQuotationId}
+              onBack={() => handleNavigate("quotations")}
+              onNavigateToApproval={() => handleNavigate("approvals")}
+            />
+          )}
+
+          {safeTab === "approvals" && (
+            <ApprovalsView
+              onOpenQuote={(quoteId) => handleNavigate("quotation-builder", quoteId)}
+              initialApprovalId={selectedApprovalId}
+            />
+          )}
+
+          {safeTab === "fulfillment" && <FulfillmentView />}
+
+          {safeTab === "subscriptions" && <SubscriptionsView />}
+
+          {safeTab === "invoices" && <InvoicesView />}
+
+          {safeTab === "deal-health" && (
+            <DealHealthView
+              onOpenQuote={(quoteId) => handleNavigate("quotation-builder", quoteId)}
+            />
+          )}
+
+          {safeTab === "reports" && <ReportingView />}
+
+          {safeTab === "governance" && <AdminConfigView initialTab="governance" />}
+
+          {safeTab === "warehouses" && <AdminConfigView initialTab="warehouses" />}
+
+          {safeTab === "admin" && <AdminConfigView />}
+
+          {safeTab === "portal" && (
+            <CustomerPortalView initialQuoteId={selectedQuotationId} />
+          )}
+
+          {safeTab === "profile" && <ProfileView onNavigate={handleNavigate} />}
         </AppShell>
       )}
       <Toaster richColors position="top-right" />

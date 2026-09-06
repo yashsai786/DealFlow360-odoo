@@ -86,6 +86,9 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
       const user = await identityActions.login(loginEmail.trim(), loginPassword);
       setLoginLoading(false);
       if (user) {
+        if (user.role === "CUSTOMER") {
+          sessionStorage.setItem("df360_active_tab", "portal");
+        }
         toast.success(`Welcome back, ${user.name}!`, {
           description: `Signed in as ${ROLE_LABELS[user.role] ?? user.role}`,
         });
@@ -108,6 +111,9 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
       const user = await identityActions.login(demoUser.email, "DealFlow@2026");
       setLoginLoading(false);
       if (user) {
+        if (user.role === "CUSTOMER") {
+          sessionStorage.setItem("df360_active_tab", "portal");
+        }
         toast.success(`Welcome back, ${user.name}!`, {
           description: `Signed in as ${ROLE_LABELS[user.role] ?? user.role}`,
         });
@@ -163,6 +169,9 @@ export function AuthView({ onSuccess, defaultTab = "login" }: AuthViewProps) {
           : undefined
       );
       setSignupLoading(false);
+      if (newUser.role === "CUSTOMER") {
+        sessionStorage.setItem("df360_active_tab", "portal");
+      }
       toast.success("Account created & secured!", {
         description: `Welcome to DealFlow360, ${newUser.name}.${
           customerMode === "NEW" ? ` Registered company "${newCompanyName.trim()}".` : ""

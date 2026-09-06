@@ -13,3 +13,5 @@ scratch/
 
 final_comprehensive_audit.ts
 test_delivery_and_stock_deduction.ts
+test_customer_login_redirect.ts
+scripts/test_*.ts
