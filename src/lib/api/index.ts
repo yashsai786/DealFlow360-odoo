@@ -330,7 +330,11 @@ export const approvalsApi = {
     const qs = query.toString();
     return apiClient<Approval[]>(`/api/approvals${qs ? `?${qs}` : ""}`);
   },
-  getById: (id: string) => apiClient<Approval>(`/api/approvals/${id}`),
+  create: (approval: Partial<Approval>) =>
+    apiClient<Approval>("/api/approvals", {
+      method: "POST",
+      body: JSON.stringify(approval),
+    }),
   decide: (
     id: string,
     decision: "APPROVED" | "RETURNED" | "REJECTED" | "APPROVE" | "RETURN" | "REJECT",

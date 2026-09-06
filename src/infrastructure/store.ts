@@ -779,7 +779,7 @@ export const approvalActions = {
   ) {
     const user = requireSession();
     assertCan(user.role, "approval.decide");
-    const approval = state.approvals.find((a) => a.id === approvalId);
+    const approval = state.approvals.find((a) => a.id === approvalId || a.quotationId === approvalId);
     if (!approval) throw new Error("Approval not found");
     const stepIndex = approval.steps.findIndex((s) => s.status === "PENDING");
     if (stepIndex < 0) throw new Error("This approval workflow has already been completed.");
@@ -790,11 +790,22 @@ export const approvalActions = {
       throw ApprovalRequired("A reason is required when returning or rejecting a quotation.");
 
     try {
-      const res = await approvalsApi.decide(approvalId, decision, reason);
+      let res;
+      try {
+        res = await approvalsApi.decide(approval.id, decision, reason);
+      } catch (decideErr: any) {
+        if (decideErr?.message?.includes("not found")) {
+          // Auto-sync missing approval to server DB and retry decision once
+          await approvalsApi.create(approval).catch(() => null);
+          res = await approvalsApi.decide(approval.id, decision, reason);
+        } else {
+          throw decideErr;
+        }
+      }
       if (res.approval) {
         state = {
           ...state,
-          approvals: state.approvals.map((a) => (a.id === approvalId ? res.approval : a)),
+          approvals: state.approvals.map((a) => (a.id === approval.id ? res.approval : a)),
         };
       }
       if (res.quotation) {
@@ -1378,6 +1389,9 @@ export const negotiationActions = {
         ...state,
         approvals: [approval, ...state.approvals.filter((a) => a.quotationId !== quotationId)],
       };
+      approvalsApi
+        .create(approval)
+        .catch((err) => console.warn("Failed to persist reapproval to database:", err));
       emit("QuotationReapprovalTriggered", `${quotation.number} · ${evaluation.riskLevel}`);
     } else if (accept) {
       next = { ...next, stage: "APPROVED" };
@@ -1457,6 +1471,10 @@ export const negotiationActions = {
       );
       emit("QuotationReapprovalTriggered", `${quotation.number} · ${evaluation.riskLevel}`);
       notify();
+
+      approvalsApi
+        .create(approval)
+        .catch((err) => console.warn("Failed to persist reapproval to database:", err));
 
       try {
         await quotationsApi.update(quotationId, { stage: "PENDING_APPROVAL" });

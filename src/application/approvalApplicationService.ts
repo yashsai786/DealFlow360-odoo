@@ -39,6 +39,24 @@ export class ApprovalApplicationService {
     return approval;
   }
 
+  async create(data: Partial<Approval>, actor: User): Promise<Approval> {
+    if (actor.role === "CUSTOMER") {
+      throw new Error("Access denied: Customers cannot create approvals.");
+    }
+    const approval: Approval = {
+      id: data.id || uid("app"),
+      quotationId: data.quotationId!,
+      status: data.status || "PENDING",
+      riskLevel: data.riskLevel || "MEDIUM",
+      submittedBy: data.submittedBy || actor.id,
+      submittedAt: data.submittedAt || now(),
+      steps: data.steps || [
+        { role: "SALES_MANAGER", status: "PENDING" },
+      ],
+    };
+    return await approvalRepository.create(approval);
+  }
+
   async decide(
     approvalId: string,
     rawDecision: string,
@@ -70,7 +88,54 @@ export class ApprovalApplicationService {
       throw new Error("A reason is required when returning or rejecting a quotation.");
     }
 
-    const approval = await approvalRepository.findById(approvalId);
+    let approval = await approvalRepository.findById(approvalId);
+    if (!approval) {
+      // 1. Try finding by quotationId directly
+      approval = await approvalRepository.findByQuotationId(approvalId);
+    }
+    if (!approval) {
+      // 2. Check if a quotation exists with this ID and needs an approval
+      const quote = await quotationRepository.findById(approvalId).catch(() => null);
+      if (quote) {
+        approval = await approvalRepository.findByQuotationId(quote.id);
+        if (!approval && quote.stage === "PENDING_APPROVAL") {
+          approval = await approvalRepository.create({
+            id: approvalId.startsWith("a-") || approvalId.startsWith("app-") ? approvalId : `app-${quote.id.replace("q-", "")}`,
+            quotationId: quote.id,
+            status: "PENDING",
+            riskLevel: "HIGH",
+            submittedBy: quote.ownerId || actor.id,
+            submittedAt: now(),
+            steps: [
+              { role: "SALES_MANAGER", status: "PENDING" },
+              { role: "FINANCE", status: "PENDING" },
+            ],
+          });
+        }
+      }
+    }
+    if (!approval) {
+      // 3. Fallback: Check if any pending quote is missing its approval record in DB
+      const pendingQuotes = await quotationRepository.list({ stage: "PENDING_APPROVAL" as any }).catch(() => []);
+      for (const pq of pendingQuotes) {
+        const existingApp = await approvalRepository.findByQuotationId(pq.id);
+        if (!existingApp) {
+          approval = await approvalRepository.create({
+            id: approvalId,
+            quotationId: pq.id,
+            status: "PENDING",
+            riskLevel: "HIGH",
+            submittedBy: pq.ownerId || actor.id,
+            submittedAt: now(),
+            steps: [
+              { role: "SALES_MANAGER", status: "PENDING" },
+              { role: "FINANCE", status: "PENDING" },
+            ],
+          });
+          break;
+        }
+      }
+    }
     if (!approval) {
       throw new Error(`Approval '${approvalId}' not found`);
     }
@@ -106,7 +171,7 @@ export class ApprovalApplicationService {
     const status: ApprovalStepStatus =
       decision === "APPROVED" ? (chainComplete ? "APPROVED" : "PENDING") : decision;
 
-    const updatedApproval = await approvalRepository.update(approvalId, {
+    const updatedApproval = await approvalRepository.update(approval.id, {
       steps,
       status,
     });

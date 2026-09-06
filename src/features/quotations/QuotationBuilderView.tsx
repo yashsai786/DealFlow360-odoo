@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   useAppState,
   productMap,
@@ -84,6 +84,16 @@ export function QuotationBuilderView({
     state.products[0]?.id ?? "p-laptop",
   );
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [orderDiscount, setOrderDiscount] = useState<string>("");
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [repChatInput, setRepChatInput] = useState("");
+
+  useEffect(() => {
+    if (quotationId !== activeQuoteId) {
+      setActiveQuoteId(quotationId);
+    }
+  }, [quotationId]);
 
   // Find the active quotation or null
   const quotation = state.quotations.find((q) => q.id === activeQuoteId);
@@ -227,10 +237,6 @@ export function QuotationBuilderView({
     }
   };
 
-  const [orderDiscount, setOrderDiscount] = useState<string>("");
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-
   const handleDeleteDraft = async () => {
     if (!quotation || quotation.stage !== "DRAFT") return;
     setIsDeleting(true);
@@ -295,8 +301,6 @@ export function QuotationBuilderView({
       toast.error(err.message || "Confirmation failed");
     }
   };
-
-  const [repChatInput, setRepChatInput] = useState("");
 
   const handleRepRespond = (requestId: string, accept: boolean) => {
     try {

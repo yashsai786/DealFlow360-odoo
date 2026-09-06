@@ -19,3 +19,19 @@ export async function GET(req: Request) {
     return apiError("APPROVALS_FETCH_ERROR", err?.message || "Failed to fetch approvals", statusCode);
   }
 }
+
+export async function POST(req: Request) {
+  try {
+    const actor = await resolveActor(req);
+    const body = await req.json().catch(() => ({}));
+    if (!body?.quotationId) {
+      return apiError("VALIDATION_ERROR", "Quotation ID is required to create approval", 400);
+    }
+    const created = await approvalApplicationService.create(body, actor);
+    return apiSuccess(created, 201);
+  } catch (err: any) {
+    const statusCode = err?.statusCode || (err?.message?.includes("Access denied") ? 403 : 500);
+    return apiError("APPROVAL_CREATE_ERROR", err?.message || "Failed to create approval", statusCode);
+  }
+}
+
